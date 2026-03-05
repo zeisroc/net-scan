@@ -63,6 +63,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		MinRate:   scanThreads,
 		Proxy:     scanProxy,
 		Debug:     debug,
+		Verbose:   verbose,
 	}
 
 	target := scanTarget

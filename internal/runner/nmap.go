@@ -17,6 +17,7 @@ type NmapRunner struct {
 	MinRate   int
 	Proxy     string // SOCKS5 host:port via proxychains; empty = no proxy
 	Debug     bool   // print the full nmap command before running
+	Verbose   bool   // print full nmap output; default prints only discovered-port lines
 }
 
 // targetArgs parses the raw --target value and returns the nmap target arguments.
@@ -57,7 +58,11 @@ func targetArgs(raw string) ([]string, string, error) {
 }
 
 // RunAllPorts runs phase 1: nmap -p- to discover all open ports.
-// It streams nmap output to stdout in real time.
+//
+// Output behaviour:
+//   - default:  only "Discovered open port" lines are printed
+//   - --verbose: full nmap output is printed
+//
 // Returns the path to the saved XML file.
 func (r *NmapRunner) RunAllPorts(target string) (string, error) {
 	tArgs, label, err := targetArgs(target)
@@ -70,6 +75,11 @@ func (r *NmapRunner) RunAllPorts(target string) (string, error) {
 }
 
 // RunServiceDetection runs phase 2: nmap -sV -sC on specific ports.
+//
+// Output behaviour:
+//   - default:  silent
+//   - --verbose: full nmap output is printed
+//
 // Returns the path to the saved XML file.
 func (r *NmapRunner) RunServiceDetection(target, ports string) (string, error) {
 	tArgs, label, err := targetArgs(target)
@@ -92,9 +102,14 @@ func (r *NmapRunner) buildArgs(nmapArgs []string) []string {
 	return args
 }
 
-// run executes the assembled command. When stream=true it pipes stdout directly
-// to os.Stdout so the user sees live output; otherwise output is suppressed.
-func (r *NmapRunner) run(args []string, stream bool) error {
+// run executes the assembled command.
+//
+// isPhase1 controls output when Verbose is false:
+//   - true  → filter stdout to "Discovered open port" lines only
+//   - false → discard stdout (silent)
+//
+// When Verbose is true, full stdout is always printed regardless of isPhase1.
+func (r *NmapRunner) run(args []string, isPhase1 bool) error {
 	if err := os.MkdirAll(r.OutputDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
@@ -104,51 +119,50 @@ func (r *NmapRunner) run(args []string, stream bool) error {
 		fmt.Fprintf(os.Stderr, "\033[33m[debug] %s\033[0m\n", strings.Join(args, " "))
 	}
 	cmd.Stdin = os.Stdin   // allow sudo password prompt
-	cmd.Stderr = os.Stderr // nmap status lines go to stderr
+	cmd.Stderr = os.Stderr // nmap progress lines
 
-	if stream {
+	switch {
+	case r.Verbose:
+		// Full output for both phases.
+		cmd.Stdout = os.Stdout
+		return runCmd(cmd)
+
+	case isPhase1:
+		// Filter: only print "Discovered open port" lines.
 		pr, pw := io.Pipe()
 		cmd.Stdout = pw
-
 		done := make(chan error, 1)
 		go func() {
-			done <- streamPorts(pr)
+			done <- filterDiscovered(pr)
 		}()
-
 		if err := cmd.Run(); err != nil {
 			pw.Close()
 			return fmt.Errorf("nmap: %w", err)
 		}
 		pw.Close()
 		return <-done
-	}
 
-	// Non-streaming: just print the live nmap output as-is.
-	cmd.Stdout = os.Stdout
+	default:
+		// Phase 2, non-verbose: silent.
+		cmd.Stdout = io.Discard
+		return runCmd(cmd)
+	}
+}
+
+func runCmd(cmd *exec.Cmd) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("nmap: %w", err)
 	}
 	return nil
 }
 
-// streamPorts reads nmap stdout line by line. When a new open port is seen
-// it prints a highlighted IP:PORT line immediately.
-func streamPorts(r io.Reader) error {
+// filterDiscovered reads nmap stdout and prints only "Discovered open port" lines.
+func filterDiscovered(r io.Reader) error {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Println(line) // echo raw output
-
-		// Detect lines like: "Discovered open port 22/tcp on 192.168.1.1"
 		if strings.Contains(line, "Discovered open port") {
-			parts := strings.Fields(line)
-			// parts[3] = port/proto, parts[5] = ip
-			if len(parts) >= 6 {
-				portProto := parts[3]
-				ip := parts[5]
-				portNum := strings.Split(portProto, "/")[0]
-				fmt.Printf("\033[32m[+] OPEN  %s:%s\033[0m\n", ip, portNum)
-			}
+			fmt.Println(line)
 		}
 	}
 	return scanner.Err()

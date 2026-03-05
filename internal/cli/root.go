@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	dbPath string
-	debug  bool
-	gDB    *sql.DB
+	dbPath  string
+	debug   bool
+	verbose bool
+	gDB     *sql.DB
 )
 
 var rootCmd = &cobra.Command{
@@ -30,6 +31,7 @@ func init() {
 	defaultDB := filepath.Join(home, ".pwnbox", "network.db")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDB, "SQLite DB path")
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Print nmap commands before executing")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Print full nmap output (default: discovered ports only)")
 }
 
 func openDB(cmd *cobra.Command, args []string) error {
