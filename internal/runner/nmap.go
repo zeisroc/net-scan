@@ -70,7 +70,8 @@ func (r *NmapRunner) RunAllPorts(target string) (string, error) {
 		return "", err
 	}
 	xmlPath := r.xmlPathFromLabel(label, "phase1")
-	nmapArgs := append([]string{"-p-", fmt.Sprintf("--min-rate=%d", r.MinRate), "-oX", xmlPath}, tArgs...)
+	// -v makes nmap emit "Discovered open port" lines as it scans.
+	nmapArgs := append([]string{"-p-", "-v", fmt.Sprintf("--min-rate=%d", r.MinRate), "-oX", xmlPath}, tArgs...)
 	return xmlPath, r.run(r.buildArgs(nmapArgs), true)
 }
 
@@ -128,7 +129,10 @@ func (r *NmapRunner) run(args []string, isPhase1 bool) error {
 		return runCmd(cmd)
 
 	case isPhase1:
-		// Filter: only print "Discovered open port" lines.
+		// Use stdbuf to force line-buffered stdout so lines appear as nmap finds them.
+		cmd = exec.Command("stdbuf", append([]string{"-oL"}, args...)...)
+		cmd.Stdin = os.Stdin
+		cmd.Stderr = os.Stderr
 		pr, pw := io.Pipe()
 		cmd.Stdout = pw
 		done := make(chan error, 1)
