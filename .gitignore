@@ -2,3 +2,4 @@ network-scanner
 *.db
 *.xml
 /dist/
+bin/
