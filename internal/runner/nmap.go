@@ -16,6 +16,7 @@ type NmapRunner struct {
 	OutputDir string // directory to save XML files
 	MinRate   int
 	Proxy     string // SOCKS5 host:port via proxychains; empty = no proxy
+	Debug     bool   // print the full nmap command before running
 }
 
 // targetArgs parses the raw --target value and returns the nmap target arguments.
@@ -99,6 +100,9 @@ func (r *NmapRunner) run(args []string, stream bool) error {
 	}
 
 	cmd := exec.Command(args[0], args[1:]...)
+	if r.Debug {
+		fmt.Fprintf(os.Stderr, "\033[33m[debug] %s\033[0m\n", strings.Join(args, " "))
+	}
 	cmd.Stdin = os.Stdin   // allow sudo password prompt
 	cmd.Stderr = os.Stderr // nmap status lines go to stderr
 

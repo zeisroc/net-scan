@@ -12,6 +12,7 @@ import (
 
 var (
 	dbPath string
+	debug  bool
 	gDB    *sql.DB
 )
 
@@ -28,6 +29,7 @@ func init() {
 	home, _ := os.UserHomeDir()
 	defaultDB := filepath.Join(home, ".pwnbox", "network.db")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDB, "SQLite DB path")
+	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Print nmap commands before executing")
 }
 
 func openDB(cmd *cobra.Command, args []string) error {
