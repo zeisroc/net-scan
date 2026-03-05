@@ -31,6 +31,12 @@ var scanCmd = &cobra.Command{
   Phase 1: all-ports discovery  (nmap -p-)
   Phase 2: service/version detection (nmap -sV -sC) on discovered ports
 
+Target formats accepted:
+  Single IP:            -t 10.10.10.1
+  CIDR:                 -t 192.168.1.0/24
+  Comma-separated:      -t 10.0.0.1,10.0.0.2,192.168.1.0/24
+  File (one per line):  -t /tmp/targets.txt
+
 Both phases run under sudo. Use --proxy to route through proxychains.`,
 	PreRunE: openDB,
 	RunE:    runScan,
@@ -40,7 +46,7 @@ func init() {
 	home, _ := os.UserHomeDir()
 	defaultOut := filepath.Join(home, ".pwnbox", "scans")
 
-	scanCmd.Flags().StringVarP(&scanTarget, "target", "t", "", "Target IP, CIDR, or @file (required)")
+	scanCmd.Flags().StringVarP(&scanTarget, "target", "t", "", "Target: IP, CIDR, comma-separated list, or file path (required)")
 	scanCmd.Flags().StringVar(&scanProject, "project", "", "Engagement label")
 	scanCmd.Flags().BoolVar(&scanPortsOnly, "ports-only", false, "Only run all-ports scan (skip -sV/-sC)")
 	scanCmd.Flags().StringVar(&scanProxy, "proxy", "", "SOCKS5 proxy host:port (via proxychains)")

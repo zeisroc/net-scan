@@ -18,31 +18,66 @@ type NmapRunner struct {
 	Proxy     string // SOCKS5 host:port via proxychains; empty = no proxy
 }
 
+// targetArgs parses the raw --target value and returns the nmap target arguments.
+//
+// Accepted formats:
+//   - Single IP or CIDR:          "10.10.10.1" / "192.168.1.0/24"
+//   - Comma-separated list:       "10.0.0.1,10.0.0.2,192.168.1.0/24"
+//   - File path (must exist):     "/tmp/targets.txt"  →  -iL /tmp/targets.txt
+func targetArgs(raw string) ([]string, string, error) {
+	// Check if it's an existing file.
+	if info, err := os.Stat(raw); err == nil && !info.IsDir() {
+		label := filepath.Base(raw)
+		return []string{"-iL", raw}, label, nil
+	}
+
+	// Comma-separated list → split into individual nmap target args.
+	if strings.Contains(raw, ",") {
+		targets := []string{}
+		for _, t := range strings.Split(raw, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				targets = append(targets, t)
+			}
+		}
+		if len(targets) == 0 {
+			return nil, "", fmt.Errorf("no valid targets in %q", raw)
+		}
+		label := strings.NewReplacer("/", "_", ":", "_", " ", "_", ",", "+").Replace(raw)
+		if len(label) > 40 {
+			label = label[:40]
+		}
+		return targets, label, nil
+	}
+
+	// Single IP or CIDR.
+	label := strings.NewReplacer("/", "_", ":", "_").Replace(raw)
+	return []string{raw}, label, nil
+}
+
 // RunAllPorts runs phase 1: nmap -p- to discover all open ports.
 // It streams nmap output to stdout in real time.
 // Returns the path to the saved XML file.
 func (r *NmapRunner) RunAllPorts(target string) (string, error) {
-	xmlPath := r.xmlPath(target, "phase1")
-	args := r.buildArgs([]string{
-		"-p-",
-		fmt.Sprintf("--min-rate=%d", r.MinRate),
-		"-oX", xmlPath,
-		target,
-	})
-	return xmlPath, r.run(args, true)
+	tArgs, label, err := targetArgs(target)
+	if err != nil {
+		return "", err
+	}
+	xmlPath := r.xmlPathFromLabel(label, "phase1")
+	nmapArgs := append([]string{"-p-", fmt.Sprintf("--min-rate=%d", r.MinRate), "-oX", xmlPath}, tArgs...)
+	return xmlPath, r.run(r.buildArgs(nmapArgs), true)
 }
 
 // RunServiceDetection runs phase 2: nmap -sV -sC on specific ports.
 // Returns the path to the saved XML file.
 func (r *NmapRunner) RunServiceDetection(target, ports string) (string, error) {
-	xmlPath := r.xmlPath(target, "phase2")
-	args := r.buildArgs([]string{
-		"-p", ports,
-		"-sV", "-sC",
-		"-oX", xmlPath,
-		target,
-	})
-	return xmlPath, r.run(args, false)
+	tArgs, label, err := targetArgs(target)
+	if err != nil {
+		return "", err
+	}
+	xmlPath := r.xmlPathFromLabel(label, "phase2")
+	nmapArgs := append([]string{"-p", ports, "-sV", "-sC", "-oX", xmlPath}, tArgs...)
+	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }
 
 // buildArgs assembles the full command: [proxychains -q] sudo nmap <nmapArgs...>
@@ -115,9 +150,9 @@ func streamPorts(r io.Reader) error {
 	return scanner.Err()
 }
 
-// xmlPath returns a timestamped XML path for a given target and phase.
-func (r *NmapRunner) xmlPath(target, phase string) string {
+// xmlPathFromLabel returns a timestamped XML path using a sanitised label.
+func (r *NmapRunner) xmlPathFromLabel(label, phase string) string {
 	ts := time.Now().Format("20060102_150405")
-	safe := strings.NewReplacer("/", "_", ":", "_", " ", "_").Replace(target)
-	return filepath.Join(r.OutputDir, fmt.Sprintf("%s_%s_%s.xml", ts, safe, phase))
+	return filepath.Join(r.OutputDir, fmt.Sprintf("%s_%s_%s.xml", ts, label, phase))
 }
+
