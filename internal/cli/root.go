@@ -16,9 +16,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "network-scanner",
+	Use:   "net-scan",
 	Short: "nmap wrapper with persistent SQLite storage",
-	Long: `network-scanner runs structured nmap scans and stores results in
+	Long: `net-scan runs structured nmap scans and stores results in
 ~/.pwnbox/network.db. It also ingests output from SharpScan and exports
 data for credops and nxc.`,
 	SilenceUsage: true,

@@ -25,7 +25,7 @@ Formats:
   nxc-list                                    — space-separated IPs
 
 Example:
-  network-scanner export --service mssql --format targets-file > mssql.txt
+  net-scan export --service mssql --format targets-file > mssql.txt
   credops creds test -t mssql.txt -P mssql`,
 	PreRunE: openDB,
 	RunE:    runExport,

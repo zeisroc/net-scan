@@ -1,4 +1,4 @@
-# network-scanner
+# net-scan
 
 A Go wrapper around `nmap` that runs structured port scans, stores all results in a shared SQLite database (`~/.pwnbox/network.db`), ingests output from [SharpScan](https://github.com/7own/SharpScan) executed on victim machines, and exports data for `credops` and `nxc`.
 
@@ -9,7 +9,7 @@ Part of the **pwnbox** toolchain.
 ## Installation
 
 ```bash
-go install github.com/pwnbox/net_scan/cmd/network-scanner@latest
+go install github.com/pwnbox/net_scan/cmd/net-scan@latest
 ```
 
 Or build from source:
@@ -17,7 +17,7 @@ Or build from source:
 ```bash
 git clone <repo>
 cd net_scan
-go build -o network-scanner ./cmd/network-scanner/
+go build -o net-scan ./cmd/net-scan/
 ```
 
 > **Requires:** `nmap` and `sudo` on PATH. `proxychains` only needed when `--proxy` is used.
@@ -43,19 +43,19 @@ Two-phase pipeline under `sudo`:
 
 ```bash
 # Full scan (default)
-network-scanner scan -t 10.10.10.1
+net-scan scan -t 10.10.10.1
 
 # Scan a subnet, tag with project label
-network-scanner scan -t 192.168.1.0/24 --project corp-internal
+net-scan scan -t 192.168.1.0/24 --project corp-internal
 
 # Fast port-only scan (skip service detection)
-network-scanner scan -t 10.10.10.1 --ports-only
+net-scan scan -t 10.10.10.1 --ports-only
 
 # Route through proxychains (SOCKS5 pivot)
-network-scanner scan -t 172.16.0.0/24 --proxy 127.0.0.1:1080
+net-scan scan -t 172.16.0.0/24 --proxy 127.0.0.1:1080
 
 # Custom rate and output directory
-network-scanner scan -t 10.0.0.1 --threads 1000 --output-dir /tmp/scans
+net-scan scan -t 10.0.0.1 --threads 1000 --output-dir /tmp/scans
 ```
 
 **Flags:**
@@ -76,16 +76,16 @@ Import [SharpScan](https://github.com/7own/SharpScan) output or raw nmap XML col
 
 ```bash
 # Ingest SharpScan output (auto-detected)
-network-scanner ingest -f sharpscan_output.txt
+net-scan ingest -f sharpscan_output.txt
 
 # Override detected source hostname
-network-scanner ingest -f scan.txt --source-host WEB05 --project corp-internal
+net-scan ingest -f scan.txt --source-host WEB05 --project corp-internal
 
 # Ingest nmap XML
-network-scanner ingest -f results.xml --format nmap-xml
+net-scan ingest -f results.xml --format nmap-xml
 
 # From stdin
-cat scan.txt | network-scanner ingest --format sharpscan
+cat scan.txt | net-scan ingest --format sharpscan
 ```
 
 **SharpScan format:**
@@ -112,24 +112,24 @@ If a port already exists in the DB from another source, the source field is upda
 
 ```bash
 # List all known hosts and ports
-network-scanner list
+net-scan list
 
 # Filter by IP prefix
-network-scanner list --host 192.168.1
+net-scan list --host 192.168.1
 
 # Filter by service
-network-scanner list --service mssql
-network-scanner list --service http
+net-scan list --service mssql
+net-scan list --service http
 
 # Filter by port
-network-scanner list --port 445
+net-scan list --port 445
 
 # Filter by project
-network-scanner list --project corp-internal
+net-scan list --project corp-internal
 
 # Output as JSON or markdown
-network-scanner list --json
-network-scanner list --markdown
+net-scan list --json
+net-scan list --markdown
 ```
 
 **Example output:**
@@ -158,14 +158,14 @@ IP               HOSTNAME    PORT   PROTO  SERVICE   VERSION         SOURCE
 
 ```bash
 # Get all MSSQL targets → feed into credops
-network-scanner export --service mssql --format targets-file > mssql_targets.txt
+net-scan export --service mssql --format targets-file > mssql_targets.txt
 credops creds test -t mssql_targets.txt -P mssql
 
 # All hosts with SMB open for nxc
-network-scanner export --port 445 --format nxc-list
+net-scan export --port 445 --format nxc-list
 
 # Filter by project
-network-scanner export --project corp-internal --format targets-file
+net-scan export --project corp-internal --format targets-file
 ```
 
 **Formats:**
@@ -195,8 +195,8 @@ network-scanner export --project corp-internal --format targets-file
 ## Project Structure
 
 ```
-network-scanner/
-├── cmd/network-scanner/main.go
+net-scan/
+├── cmd/net-scan/main.go
 ├── internal/
 │   ├── cli/          # cobra commands (root, scan, ingest, list, export)
 │   ├── db/           # SQLite init, schema, upsert/query operations
@@ -212,6 +212,6 @@ network-scanner/
 | Consumer | Usage |
 |----------|-------|
 | `credops` | Reads `~/.pwnbox/network.db` to scope tests to open ports |
-| `pwnbox-tools` | Calls `network-scanner scan` as subprocess |
-| Manual | `network-scanner export --service mssql \| credops ...` |
+| `pwnbox-tools` | Calls `net-scan scan` as subprocess |
+| Manual | `net-scan export --service mssql \| credops ...` |
 

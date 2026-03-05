@@ -1,6 +1,6 @@
-BINARY := network-scanner
+BINARY := net-scan
 BIN_DIR := bin
-CMD := ./cmd/network-scanner
+CMD := ./cmd/net-scan
 
 .PHONY: all build clean
 

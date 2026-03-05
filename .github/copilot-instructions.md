@@ -1,16 +1,16 @@
-# GitHub Copilot Instructions — `network-scanner`
+# GitHub Copilot Instructions — `net-scan`
 
 ## Project Overview
 
-`network-scanner` is a Go CLI tool that wraps `nmap` to run structured port scans,
+`net-scan` is a Go CLI tool that wraps `nmap` to run structured port scans,
 stores all results in a shared SQLite database (`~/.pwnbox/network.db`), and ingests
 output from other scanners (e.g. SharpScan) run on victim machines.
 
 It is part of the **pwnbox** toolchain:
 - `credops` reads the DB to scope credential-testing only to open ports.
-- `pwnbox-tools` calls `network-scanner scan` as a subprocess.
+- `pwnbox-tools` calls `net-scan scan` as a subprocess.
 
-Binary name: `network-scanner`
+Binary name: `net-scan`
 
 ---
 
@@ -29,9 +29,9 @@ Binary name: `network-scanner`
 ## Repository Layout
 
 ```
-network-scanner/
+net-scan/
 ├── cmd/
-│   └── network-scanner/
+│   └── net-scan/
 │       └── main.go               // entry point: calls cli.Execute()
 ├── internal/
 │   ├── cli/
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS open_ports (
 ### `scan` — Run nmap against a target
 
 ```
-network-scanner scan --target <IP|CIDR|file> [flags]
+net-scan scan --target <IP|CIDR|file> [flags]
 ```
 
 Flags:
@@ -133,7 +133,7 @@ the terminal will prompt naturally (inherit stdin/stdout/stderr of the parent pr
 ### `ingest` — Import scanner output from victim machines
 
 ```
-network-scanner ingest [flags]
+net-scan ingest [flags]
 ```
 
 Flags:
@@ -160,7 +160,7 @@ Flags:
 ### `list` — Query the database
 
 ```
-network-scanner list [flags]
+net-scan list [flags]
 ```
 
 Flags:
@@ -182,7 +182,7 @@ IP               HOSTNAME    PORT   PROTO  SERVICE   VERSION      SOURCE
 ### `export` — Export for other tools
 
 ```
-network-scanner export [flags]
+net-scan export [flags]
 ```
 
 Flags:
@@ -248,5 +248,5 @@ type OpenPort struct {
 ## Integration Notes
 
 - `credops` reads `~/.pwnbox/network.db` directly — do not change the schema without coordinating.
-- When building, the binary should be installable via `go install ./cmd/network-scanner`.
+- When building, the binary should be installable via `go install ./cmd/net-scan`.
 - No CGO: use `modernc.org/sqlite` (pure Go) to keep the binary fully static.

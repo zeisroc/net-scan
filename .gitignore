@@ -1,4 +1,4 @@
-network-scanner
+net-scan
 *.db
 *.xml
 /dist/
