@@ -96,6 +96,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	portList := strings.Join(openPorts, ",")
 
+	// Build a set of (ip, port) pairs confirmed in phase 1, so phase 2
+	// cannot introduce ports that were not actually discovered.
+	phase1Ports := buildPortSet(hosts)
+
 	fmt.Printf("\n\033[1m[*] Phase 2 — Service detection on %d port(s)\033[0m\n\n", len(openPorts))
 	phase2XML, err := r.RunServiceDetection(target, portList)
 	if err != nil {
@@ -107,6 +111,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parse phase2 xml: %w", err)
 	}
 	applyProject(hosts2, scanProject)
+
+	// Filter phase 2 results: only keep ports confirmed by phase 1.
+	filterToKnownPorts(hosts2, phase1Ports)
 
 	if _, err := dbpkg.UpsertHosts(gDB, hosts2); err != nil {
 		return fmt.Errorf("save phase2 results: %w", err)
@@ -139,6 +146,32 @@ func collectOpenPorts(hosts []models.Host) []string {
 	}
 	sort.Strings(ports)
 	return ports
+}
+
+// buildPortSet returns a set of "ip:port" strings from phase 1 results.
+func buildPortSet(hosts []models.Host) map[string]struct{} {
+	set := map[string]struct{}{}
+	for _, h := range hosts {
+		for _, p := range h.Ports {
+			set[fmt.Sprintf("%s:%d", h.IP, p.Port)] = struct{}{}
+		}
+	}
+	return set
+}
+
+// filterToKnownPorts removes from each host any port not present in the phase1 set,
+// preventing phase 2 from introducing false-positive ports.
+func filterToKnownPorts(hosts []models.Host, known map[string]struct{}) {
+	for i := range hosts {
+		var filtered []models.OpenPort
+		for _, p := range hosts[i].Ports {
+			key := fmt.Sprintf("%s:%d", hosts[i].IP, p.Port)
+			if _, ok := known[key]; ok {
+				filtered = append(filtered, p)
+			}
+		}
+		hosts[i].Ports = filtered
+	}
 }
 
 func printHostsSummary(hosts []models.Host) {

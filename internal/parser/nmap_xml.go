@@ -118,7 +118,7 @@ func ParseNmapXML(r io.Reader, source string) ([]models.Host, error) {
 		}
 
 		for _, p := range h.Ports.Ports {
-			if p.State.State != "open" && p.State.State != "filtered" {
+			if p.State.State != "open" {
 				continue
 			}
 			portNum, err := strconv.Atoi(p.PortID)
