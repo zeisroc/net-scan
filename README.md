@@ -17,6 +17,8 @@ Or build from source:
 ```bash
 git clone <repo>
 cd net_scan
+make build          # output: bin/net-scan
+# or directly:
 go build -o net-scan ./cmd/net-scan/
 ```
 
@@ -32,14 +34,28 @@ The `credops` tool reads this database directly to scope credential tests to ope
 
 ---
 
+## Global Flags
+
+These flags are available on every command:
+
+```
+--db string         Override SQLite DB path (default: ~/.pwnbox/network.db)
+-d, --debug         Print the exact nmap command before executing
+-v, --verbose       Print full nmap output (default: Phase 1 shows discovered ports only, Phase 2 is silent)
+```
+
+---
+
 ## Commands
 
 ### `scan` — Run nmap against a target
 
 Two-phase pipeline under `sudo`:
 
-1. **Phase 1** — `nmap -p- --min-rate 5000` — discovers all open ports, printed live as found
-2. **Phase 2** — `nmap -sV -sC` on discovered ports — enriches with service/version data
+1. **Phase 1** — `nmap -p- -v --min-rate 5000` — discovers all open TCP ports  
+   By default only `Discovered open port` lines are printed live. Use `-v` for full nmap output.
+2. **Phase 2** — `nmap -p <ports> -sV -sC` on the exact ports found per host — enriches with service/version data  
+   Silent by default; use `-v` for full output. Results are strictly filtered to ports confirmed in Phase 1 — Phase 2 cannot introduce new ports.
 
 ```bash
 # Full scan (default)
@@ -47,6 +63,12 @@ net-scan scan -t 10.10.10.1
 
 # Scan a subnet, tag with project label
 net-scan scan -t 192.168.1.0/24 --project corp-internal
+
+# Comma-separated targets
+net-scan scan -t 10.0.0.1,10.0.0.2,192.168.1.0/24
+
+# File with one target per line
+net-scan scan -t targets.txt
 
 # Fast port-only scan (skip service detection)
 net-scan scan -t 10.10.10.1 --ports-only
@@ -56,13 +78,16 @@ net-scan scan -t 172.16.0.0/24 --proxy 127.0.0.1:1080
 
 # Custom rate and output directory
 net-scan scan -t 10.0.0.1 --threads 1000 --output-dir /tmp/scans
+
+# Print nmap commands and full output
+net-scan scan -t 10.10.10.1 -d -v
 ```
 
 **Flags:**
 ```
--t, --target       Target IP, CIDR (required)
+-t, --target       Target: IP, CIDR, comma-separated list, or file path (required)
     --project      Engagement label
-    --ports-only   Skip -sV/-sC phase
+    --ports-only   Skip -sV/-sC phase (Phase 1 only)
     --proxy        SOCKS5 host:port (via proxychains)
     --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
     --threads      nmap --min-rate (default: 5000)
@@ -73,6 +98,8 @@ net-scan scan -t 10.0.0.1 --threads 1000 --output-dir /tmp/scans
 ### `ingest` — Import scanner output from victim machines
 
 Import [SharpScan](https://github.com/7own/SharpScan) output or raw nmap XML collected from pivot machines.
+
+Format is auto-detected from the file extension: `.xml` → `nmap-xml`, anything else → `sharpscan`. When reading from stdin, `sharpscan` is assumed.
 
 ```bash
 # Ingest SharpScan output (auto-detected)
@@ -95,12 +122,12 @@ cat scan.txt | net-scan ingest --format sharpscan
 192.168.1.11:22,3389
 ```
 
-The `# ip / hostname` header is parsed automatically as the source identifier.
+The `# ip / hostname` header is parsed automatically as the source identifier. `--source-host` overrides the parsed value.  
 If a port already exists in the DB from another source, the source field is updated to include both (e.g. `nmap, WEB05`).
 
 **Flags:**
 ```
--f, --file         Input file (stdin if omitted)
+-f, --file         Input file path (stdin if omitted)
     --format       auto | sharpscan | nmap-xml (default: auto)
     --source-host  Override source hostname
     --project      Engagement label
@@ -184,14 +211,6 @@ net-scan export --project corp-internal --format targets-file
 
 ---
 
-## Global Flags
-
-```
---db string   Override SQLite DB path (default: ~/.pwnbox/network.db)
-```
-
----
-
 ## Project Structure
 
 ```
@@ -203,9 +222,14 @@ net-scan/
 │   ├── models/       # Host, OpenPort structs
 │   ├── parser/       # nmap XML + SharpScan parsers
 │   └── runner/       # nmap executor (streaming, sudo, proxychains)
+├── Makefile
 ├── go.mod
 └── README.md
 ```
+
+**Makefile targets:** `make build` (default), `make clean`
+
+---
 
 ## Integration
 
