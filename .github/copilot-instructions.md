@@ -245,6 +245,14 @@ type OpenPort struct {
 
 ---
 
+## Git Conventions
+
+- **Atomic commits:** one logical change per commit; never bundle unrelated changes.
+- **No Co-authored-by trailers:** never include `Co-authored-by:` lines in commit messages.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) format: `type(scope): description`.
+
+---
+
 ## Integration Notes
 
 - `credops` reads `~/.pwnbox/network.db` directly — do not change the schema without coordinating.
