@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -89,6 +91,24 @@ func (r *NmapRunner) RunServiceDetection(target, ports string) (string, error) {
 	}
 	xmlPath := r.xmlPathFromLabel(label, "phase2")
 	nmapArgs := append([]string{"-p", ports, "-sV", "-sC", "-oX", xmlPath}, tArgs...)
+	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
+}
+
+// RunVersionDetection runs nmap -sV against a single stored host and its known ports.
+func (r *NmapRunner) RunVersionDetection(target string, tcpPorts, udpPorts []int) (string, error) {
+	tArgs, label, err := targetArgs(target)
+	if err != nil {
+		return "", err
+	}
+
+	portArg, extraArgs := buildVersionScanArgs(tcpPorts, udpPorts)
+	if portArg == "" {
+		return "", fmt.Errorf("no ports to scan")
+	}
+
+	xmlPath := r.xmlPathFromLabel(label, "version")
+	nmapArgs := append(extraArgs, "-sV", "-p", portArg, "-oX", xmlPath)
+	nmapArgs = append(nmapArgs, tArgs...)
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }
 
@@ -178,3 +198,53 @@ func (r *NmapRunner) xmlPathFromLabel(label, phase string) string {
 	return filepath.Join(r.OutputDir, fmt.Sprintf("%s_%s_%s.xml", ts, label, phase))
 }
 
+func buildVersionScanArgs(tcpPorts, udpPorts []int) (string, []string) {
+	tcp := sortedUniquePorts(tcpPorts)
+	udp := sortedUniquePorts(udpPorts)
+
+	var portSpecs []string
+	var extraArgs []string
+
+	if len(tcp) > 0 {
+		if len(udp) > 0 {
+			portSpecs = append(portSpecs, "T:"+joinPorts(tcp))
+		} else {
+			portSpecs = append(portSpecs, joinPorts(tcp))
+		}
+	}
+	if len(udp) > 0 {
+		extraArgs = append(extraArgs, "-sU")
+		portSpecs = append(portSpecs, "U:"+joinPorts(udp))
+	}
+
+	return strings.Join(portSpecs, ","), extraArgs
+}
+
+func sortedUniquePorts(ports []int) []int {
+	if len(ports) == 0 {
+		return nil
+	}
+
+	seen := make(map[int]struct{}, len(ports))
+	unique := make([]int, 0, len(ports))
+	for _, port := range ports {
+		if port <= 0 {
+			continue
+		}
+		if _, ok := seen[port]; ok {
+			continue
+		}
+		seen[port] = struct{}{}
+		unique = append(unique, port)
+	}
+	sort.Ints(unique)
+	return unique
+}
+
+func joinPorts(ports []int) string {
+	values := make([]string, 0, len(ports))
+	for _, port := range ports {
+		values = append(values, strconv.Itoa(port))
+	}
+	return strings.Join(values, ",")
+}

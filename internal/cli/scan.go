@@ -5,14 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/spf13/cobra"
 	dbpkg "github.com/pwnbox/net_scan/internal/db"
 	"github.com/pwnbox/net_scan/internal/models"
 	"github.com/pwnbox/net_scan/internal/parser"
 	"github.com/pwnbox/net_scan/internal/runner"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -42,6 +43,17 @@ Both phases run under sudo. Use --proxy to route through proxychains.`,
 	RunE:    runScan,
 }
 
+var scanVersionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Run nmap -sV against stored assets and ports",
+	Long: `Runs database-driven version detection against all stored open ports.
+
+This command reads host:port entries from SQLite, groups them per host, and
+executes sudo nmap -sV against those exact ports. No discovery phase is run.`,
+	PreRunE: openDB,
+	RunE:    runScanVersion,
+}
+
 func init() {
 	home, _ := os.UserHomeDir()
 	defaultOut := filepath.Join(home, ".pwnbox", "scans")
@@ -54,6 +66,10 @@ func init() {
 	scanCmd.Flags().IntVar(&scanThreads, "threads", 5000, "nmap --min-rate value")
 	_ = scanCmd.MarkFlagRequired("target")
 
+	scanVersionCmd.Flags().StringVar(&scanProxy, "proxy", "", "SOCKS5 proxy host:port (via proxychains)")
+	scanVersionCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
+
+	scanCmd.AddCommand(scanVersionCmd)
 	rootCmd.AddCommand(scanCmd)
 }
 
@@ -123,6 +139,81 @@ func runScan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runScanVersion(cmd *cobra.Command, args []string) error {
+	rows, err := dbpkg.ListVersionTargets(gDB)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		fmt.Println("[i] No stored open ports found.")
+		return nil
+	}
+
+	hosts := groupVersionTargets(rows)
+	if len(hosts) == 0 {
+		fmt.Println("[i] No valid stored ports found.")
+		return nil
+	}
+
+	r := &runner.NmapRunner{
+		OutputDir: scanOutputDir,
+		Proxy:     scanProxy,
+		Debug:     debug,
+		Verbose:   verbose,
+	}
+
+	var refreshed []models.Host
+	var failures []string
+
+	for _, host := range hosts {
+		fmt.Printf("\n\033[1m[*] Version scan — %s (%s)\033[0m\n\n", host.IP, describeVersionTarget(host))
+
+		xmlPath, err := r.RunVersionDetection(host.IP, host.TCPPorts, host.UDPPorts)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", host.IP, err))
+			fmt.Printf("[!] Failed to scan %s: %v\n", host.IP, err)
+			continue
+		}
+
+		parsed, err := parser.ParseNmapXMLFile(xmlPath, "nmap")
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: parse xml: %v", host.IP, err))
+			fmt.Printf("[!] Failed to parse results for %s: %v\n", host.IP, err)
+			continue
+		}
+
+		filterToKnownPorts(parsed, host.portSet())
+		applyProject(parsed, host.Project)
+
+		if len(parsed) == 0 {
+			fmt.Printf("[i] No open ports reported for %s.\n", host.IP)
+			continue
+		}
+
+		if _, err := dbpkg.UpsertHosts(gDB, parsed); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: save results: %v", host.IP, err))
+			fmt.Printf("[!] Failed to save results for %s: %v\n", host.IP, err)
+			continue
+		}
+
+		refreshed = append(refreshed, parsed...)
+	}
+
+	if len(refreshed) > 0 {
+		printHostsSummary(refreshed)
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("version scan failed for %d host(s): %s", len(failures), strings.Join(failures, "; "))
+	}
+
+	if len(refreshed) == 0 {
+		fmt.Println("[i] No hosts were refreshed.")
+	}
+
+	return nil
+}
+
 func applyProject(hosts []models.Host, project string) {
 	if project == "" {
 		return
@@ -153,7 +244,7 @@ func buildPortSet(hosts []models.Host) map[string]struct{} {
 	set := map[string]struct{}{}
 	for _, h := range hosts {
 		for _, p := range h.Ports {
-			set[fmt.Sprintf("%s:%d", h.IP, p.Port)] = struct{}{}
+			set[portKey(h.IP, p.Protocol, p.Port)] = struct{}{}
 		}
 	}
 	return set
@@ -165,7 +256,7 @@ func filterToKnownPorts(hosts []models.Host, known map[string]struct{}) {
 	for i := range hosts {
 		var filtered []models.OpenPort
 		for _, p := range hosts[i].Ports {
-			key := fmt.Sprintf("%s:%d", hosts[i].IP, p.Port)
+			key := portKey(hosts[i].IP, p.Protocol, p.Port)
 			if _, ok := known[key]; ok {
 				filtered = append(filtered, p)
 			}
@@ -192,11 +283,11 @@ func printHostsSummary(hosts []models.Host) {
 func printRowsSummary(rows []dbpkg.ListRow) {
 	fmt.Printf("\n\033[1m─── Results ────────────────────────────────────────────────\033[0m\n")
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "IP\tHOSTNAME\tPORT\tPROTO\tSERVICE\tVERSION\tSOURCE")
-	fmt.Fprintln(w, "──\t────────\t────\t─────\t───────\t───────\t──────")
+	fmt.Fprintln(w, "IP\tHOSTNAME\tTAG\tPORT\tPROTO\tSERVICE\tVERSION\tSOURCE")
+	fmt.Fprintln(w, "──\t────────\t───\t────\t─────\t───────\t───────\t──────")
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
-			r.IP, dash(r.Hostname), r.Port, r.Protocol,
+		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+			r.IP, dash(r.Hostname), r.Tag, r.Port, r.Protocol,
 			dash(r.Service), dash(r.Version), r.Source)
 	}
 	w.Flush()
@@ -208,4 +299,108 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+type versionTargetHost struct {
+	IP       string
+	Hostname string
+	Project  string
+	TCPPorts []int
+	UDPPorts []int
+}
+
+func groupVersionTargets(rows []dbpkg.VersionTargetRow) []versionTargetHost {
+	order := make([]string, 0)
+	grouped := make(map[string]*versionTargetHost)
+
+	for _, row := range rows {
+		if row.IP == "" || row.Port <= 0 {
+			continue
+		}
+
+		host, ok := grouped[row.IP]
+		if !ok {
+			host = &versionTargetHost{
+				IP:       row.IP,
+				Hostname: row.Hostname,
+				Project:  row.Project,
+			}
+			grouped[row.IP] = host
+			order = append(order, row.IP)
+		}
+
+		switch strings.ToLower(row.Protocol) {
+		case "", "tcp":
+			host.TCPPorts = append(host.TCPPorts, row.Port)
+		case "udp":
+			host.UDPPorts = append(host.UDPPorts, row.Port)
+		}
+	}
+
+	hosts := make([]versionTargetHost, 0, len(order))
+	for _, ip := range order {
+		host := grouped[ip]
+		host.TCPPorts = uniqueSortedInts(host.TCPPorts)
+		host.UDPPorts = uniqueSortedInts(host.UDPPorts)
+		if len(host.TCPPorts) == 0 && len(host.UDPPorts) == 0 {
+			continue
+		}
+		hosts = append(hosts, *host)
+	}
+
+	return hosts
+}
+
+func uniqueSortedInts(values []int) []int {
+	if len(values) == 0 {
+		return nil
+	}
+
+	seen := make(map[int]struct{}, len(values))
+	out := make([]int, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func describeVersionTarget(host versionTargetHost) string {
+	parts := make([]string, 0, 2)
+	if len(host.TCPPorts) > 0 {
+		parts = append(parts, fmt.Sprintf("%d tcp port(s)", len(host.TCPPorts)))
+	}
+	if len(host.UDPPorts) > 0 {
+		parts = append(parts, fmt.Sprintf("%d udp port(s)", len(host.UDPPorts)))
+	}
+	if len(parts) == 0 {
+		return "no ports"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (h versionTargetHost) portSet() map[string]struct{} {
+	set := make(map[string]struct{}, len(h.TCPPorts)+len(h.UDPPorts))
+	for _, port := range h.TCPPorts {
+		set[portKey(h.IP, "tcp", port)] = struct{}{}
+	}
+	for _, port := range h.UDPPorts {
+		set[portKey(h.IP, "udp", port)] = struct{}{}
+	}
+	return set
+}
+
+func portKey(ip, protocol string, port int) string {
+	proto := strings.ToLower(strings.TrimSpace(protocol))
+	if proto == "" {
+		proto = "tcp"
+	}
+	return ip + "|" + proto + "|" + strconv.Itoa(port)
 }

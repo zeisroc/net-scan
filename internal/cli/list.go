@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	dbpkg "github.com/pwnbox/net_scan/internal/db"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -19,8 +19,8 @@ var (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "Query the database",
+	Use:     "list",
+	Short:   "Query the database",
 	PreRunE: openDB,
 	RunE:    runList,
 }
@@ -70,11 +70,11 @@ func printJSON(rows []dbpkg.ListRow) error {
 }
 
 func printMarkdownTable(rows []dbpkg.ListRow) {
-	fmt.Println("| IP | HOSTNAME | PORT | PROTO | SERVICE | VERSION | SOURCE |")
-	fmt.Println("|---|---|---|---|---|---|---|")
+	fmt.Println("| IP | HOSTNAME | TAG | PORT | PROTO | SERVICE | VERSION | SOURCE |")
+	fmt.Println("|---|---|---|---|---|---|---|---|")
 	for _, r := range rows {
-		fmt.Printf("| %s | %s | %d | %s | %s | %s | %s |\n",
-			r.IP, dash(r.Hostname), r.Port, r.Protocol,
+		fmt.Printf("| %s | %s | %s | %d | %s | %s | %s | %s |\n",
+			r.IP, dash(r.Hostname), r.Tag, r.Port, r.Protocol,
 			dash(r.Service), dash(r.Version), r.Source)
 	}
 }

@@ -93,6 +93,29 @@ net-scan scan -t 10.10.10.1 -d -v
     --threads      nmap --min-rate (default: 5000)
 ```
 
+#### `scan version` — Re-scan stored assets with `-sV`
+
+Runs a database-driven version scan against all stored open ports in `~/.pwnbox/network.db`.
+It does not perform discovery first; instead, it reuses the current `host:port` inventory and
+executes `nmap -sV` per host on those exact ports.
+
+```bash
+# Re-scan every stored asset and known port with version detection
+net-scan scan version
+
+# Route the version scan through a SOCKS5 pivot
+net-scan scan version --proxy 127.0.0.1:1080
+
+# Save XML output somewhere else
+net-scan scan version --output-dir /tmp/scans
+```
+
+**Flags:**
+```
+    --proxy        SOCKS5 host:port (via proxychains)
+    --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
+```
+
 ---
 
 ### `ingest` — Import scanner output from victim machines
@@ -161,12 +184,12 @@ net-scan list --markdown
 
 **Example output:**
 ```
-IP               HOSTNAME    PORT   PROTO  SERVICE   VERSION         SOURCE
-192.168.1.10     DC01        88     tcp    kerberos  -               nmap, WEB05
-192.168.1.10     DC01        389    tcp    ldap      -               nmap
-192.168.1.10     DC01        445    tcp    smb       Windows SMB     nmap
-192.168.1.11     SQL27       1433   tcp    mssql     MSSQL 2019      WEB05
-192.168.1.11     SQL27       3389   tcp    rdp       -               nmap
+IP               HOSTNAME    TAG                    PORT   PROTO  SERVICE   VERSION         SOURCE
+192.168.1.10     DC01        DC, Windows, LDAP     88     tcp    kerberos  -               nmap, WEB05
+192.168.1.10     DC01        DC, Windows, LDAP     389    tcp    ldap      -               nmap
+192.168.1.10     DC01        DC, Windows, LDAP     445    tcp    smb       Windows SMB     nmap
+192.168.1.11     SQL27       Windows, MSSQL        1433   tcp    mssql     MSSQL 2019      WEB05
+192.168.1.11     SQL27       Windows, MSSQL        3389   tcp    rdp       -               nmap
 ```
 
 **Flags:**
@@ -238,4 +261,3 @@ net-scan/
 | `credops` | Reads `~/.pwnbox/network.db` to scope tests to open ports |
 | `pwnbox-tools` | Calls `net-scan scan` as subprocess |
 | Manual | `net-scan export --service mssql \| credops ...` |
-
