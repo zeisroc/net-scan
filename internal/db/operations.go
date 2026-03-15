@@ -135,6 +135,25 @@ type ListRow struct {
 	Project  string
 }
 
+// PortInfo holds the display fields for a single open port in grouped results.
+type PortInfo struct {
+	Port     int
+	Protocol string
+	Service  string
+	Version  string
+	Source   string
+}
+
+// HostRow is a grouped result containing all matching ports for one host.
+type HostRow struct {
+	IP       string
+	Hostname string
+	Pwned    bool
+	Tag      string
+	Project  string
+	Ports    []PortInfo
+}
+
 // ListPorts queries open_ports joined with hosts, applying optional filters.
 func ListPorts(db *sql.DB, f PortFilter) ([]ListRow, error) {
 	query := `
@@ -185,6 +204,89 @@ func ListPorts(db *sql.DB, f PortFilter) ([]ListRow, error) {
 		return nil, err
 	}
 	return results, nil
+}
+
+// ListHosts queries hosts and their ports applying the same filters as ListPorts,
+// but returns one HostRow per host with all matching ports grouped together.
+func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
+	query := `
+		SELECT h.ip, COALESCE(h.hostname,''),
+		       COALESCE(hm.pwned, 0),
+		       op.port, op.protocol,
+		       COALESCE(op.service,''), COALESCE(op.version,''), op.source, COALESCE(h.project,'')
+		FROM open_ports op
+		JOIN hosts h ON op.host_id = h.id
+		LEFT JOIN host_metadata hm ON hm.host_id = h.id
+		WHERE 1=1`
+	var args []any
+
+	if f.IP != "" {
+		query += ` AND h.ip LIKE ?`
+		args = append(args, f.IP+"%")
+	}
+	if f.Port > 0 {
+		query += ` AND op.port = ?`
+		args = append(args, f.Port)
+	}
+	if f.Service != "" {
+		query += ` AND op.service LIKE ?`
+		args = append(args, "%"+f.Service+"%")
+	}
+	if f.Project != "" {
+		query += ` AND h.project = ?`
+		args = append(args, f.Project)
+	}
+	query += ` ORDER BY h.ip, op.port`
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list hosts: %w", err)
+	}
+	defer rows.Close()
+
+	var order []string
+	grouped := map[string]*HostRow{}
+
+	for rows.Next() {
+		var ip, hostname, protocol, service, version, source, project string
+		var pwnedInt, port int
+		if err := rows.Scan(&ip, &hostname, &pwnedInt, &port, &protocol,
+			&service, &version, &source, &project); err != nil {
+			return nil, fmt.Errorf("scan host row: %w", err)
+		}
+
+		host, ok := grouped[ip]
+		if !ok {
+			host = &HostRow{
+				IP:       ip,
+				Hostname: hostname,
+				Pwned:    pwnedInt != 0,
+				Project:  project,
+			}
+			grouped[ip] = host
+			order = append(order, ip)
+		}
+		host.Ports = append(host.Ports, PortInfo{
+			Port:     port,
+			Protocol: protocol,
+			Service:  service,
+			Version:  version,
+			Source:   source,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]HostRow, 0, len(order))
+	for _, ip := range order {
+		result = append(result, *grouped[ip])
+	}
+
+	if err := applyTagsToHostRows(db, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // VersionTargetRow is a stored open port used to drive DB-backed version scans.
@@ -241,12 +343,13 @@ type hostFingerprint struct {
 	manualTag string
 }
 
-func applyHostTags(db *sql.DB, rows []ListRow) error {
-	if len(rows) == 0 {
-		return nil
+// buildFingerprints loads all open ports and manual tags for the given host IPs
+// and returns a per-host fingerprint used for tag classification.
+func buildFingerprints(db *sql.DB, ips []string) (map[string]*hostFingerprint, error) {
+	if len(ips) == 0 {
+		return map[string]*hostFingerprint{}, nil
 	}
 
-	ips := distinctSortedIPs(rows)
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ips)), ",")
 	args := make([]any, 0, len(ips))
 	for _, ip := range ips {
@@ -263,7 +366,7 @@ func applyHostTags(db *sql.DB, rows []ListRow) error {
 
 	tagRows, err := db.Query(query, args...)
 	if err != nil {
-		return fmt.Errorf("load host tags: %w", err)
+		return nil, fmt.Errorf("load host tags: %w", err)
 	}
 	defer tagRows.Close()
 
@@ -271,10 +374,9 @@ func applyHostTags(db *sql.DB, rows []ListRow) error {
 	for tagRows.Next() {
 		var ip string
 		var port int
-		var service string
-		var manualTag string
+		var service, manualTag string
 		if err := tagRows.Scan(&ip, &port, &service, &manualTag); err != nil {
-			return fmt.Errorf("scan host tag row: %w", err)
+			return nil, fmt.Errorf("scan host tag row: %w", err)
 		}
 
 		fp, ok := fingerprints[ip]
@@ -293,7 +395,45 @@ func applyHostTags(db *sql.DB, rows []ListRow) error {
 		}
 	}
 	if err := tagRows.Err(); err != nil {
-		return fmt.Errorf("iterate host tag rows: %w", err)
+		return nil, fmt.Errorf("iterate host tag rows: %w", err)
+	}
+
+	return fingerprints, nil
+}
+
+func applyHostTags(db *sql.DB, rows []ListRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	ips := distinctSortedIPs(rows)
+	fingerprints, err := buildFingerprints(db, ips)
+	if err != nil {
+		return err
+	}
+
+	for i := range rows {
+		rows[i].Tag = classifyTags(fingerprints[rows[i].IP])
+	}
+
+	return nil
+}
+
+func applyTagsToHostRows(db *sql.DB, rows []HostRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	ips := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.IP != "" {
+			ips = append(ips, r.IP)
+		}
+	}
+
+	fingerprints, err := buildFingerprints(db, ips)
+	if err != nil {
+		return err
 	}
 
 	for i := range rows {

@@ -12,10 +12,11 @@ type HostUpdate struct {
 	Source    *string
 	Project   *string
 	ManualTag *string
+	Pwned     *bool
 }
 
 func (u HostUpdate) HasChanges() bool {
-	return u.Hostname != nil || u.OSGuess != nil || u.Source != nil || u.Project != nil || u.ManualTag != nil
+	return u.Hostname != nil || u.OSGuess != nil || u.Source != nil || u.Project != nil || u.ManualTag != nil || u.Pwned != nil
 }
 
 type PortUpdate struct {
@@ -85,6 +86,22 @@ func UpdateHost(db *sql.DB, ip string, update HostUpdate) error {
 				updated_at = CURRENT_TIMESTAMP
 		`, hostID, strings.TrimSpace(*update.ManualTag)); err != nil {
 			return fmt.Errorf("update manual tag for %s: %w", ip, err)
+		}
+	}
+
+	if update.Pwned != nil {
+		pwnedInt := 0
+		if *update.Pwned {
+			pwnedInt = 1
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO host_metadata (host_id, pwned, updated_at)
+			VALUES (?, ?, CURRENT_TIMESTAMP)
+			ON CONFLICT(host_id) DO UPDATE SET
+				pwned     = excluded.pwned,
+				updated_at = CURRENT_TIMESTAMP
+		`, hostID, pwnedInt); err != nil {
+			return fmt.Errorf("update pwned for %s: %w", ip, err)
 		}
 	}
 

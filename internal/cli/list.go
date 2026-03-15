@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"text/tabwriter"
 
 	dbpkg "github.com/pwnbox/net_scan/internal/db"
 	"github.com/spf13/cobra"
@@ -36,7 +38,7 @@ func init() {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	rows, err := dbpkg.ListPorts(gDB, dbpkg.PortFilter{
+	hosts, err := dbpkg.ListHosts(gDB, dbpkg.PortFilter{
 		IP:      listHost,
 		Port:    listPort,
 		Service: listService,
@@ -46,35 +48,94 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if len(rows) == 0 {
+	if len(hosts) == 0 {
 		fmt.Println("[i] No results.")
 		return nil
 	}
 
 	switch {
 	case listJSON:
-		return printJSON(rows)
+		return printHostsJSON(hosts)
 	case listMD:
-		printMarkdownTable(rows)
+		printHostsMarkdown(hosts)
 	default:
-		printRowsSummary(rows)
+		printHostsTable(hosts)
 	}
 	return nil
 }
 
-// printJSON and printMarkdownTable are list-specific formatters.
-func printJSON(rows []dbpkg.ListRow) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(rows)
+const (
+	ansiRed   = "\033[31m"
+	ansiReset = "\033[0m"
+)
+
+func printHostsTable(hosts []dbpkg.HostRow) {
+	fmt.Printf("\n\033[1m─── Results ────────────────────────────────────────────────\033[0m\n")
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "IP\tHOSTNAME\tPWND\tTAG\tPORTS")
+	fmt.Fprintln(w, "──\t────────\t────\t───\t─────")
+	for _, h := range hosts {
+		hostname := dash(h.Hostname)
+		pwnd := "-"
+		if h.Pwned {
+			hostname = ansiRed + hostname + ansiReset
+			pwnd = "✓"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			h.IP, hostname, pwnd, dash(h.Tag), formatPorts(h.Ports))
+	}
+	w.Flush()
+	fmt.Println()
 }
 
-func printMarkdownTable(rows []dbpkg.ListRow) {
-	fmt.Println("| IP | HOSTNAME | TAG | PORT | PROTO | SERVICE | VERSION | SOURCE |")
-	fmt.Println("|---|---|---|---|---|---|---|---|")
-	for _, r := range rows {
-		fmt.Printf("| %s | %s | %s | %d | %s | %s | %s | %s |\n",
-			r.IP, dash(r.Hostname), r.Tag, r.Port, r.Protocol,
-			dash(r.Service), dash(r.Version), r.Source)
+func printHostsMarkdown(hosts []dbpkg.HostRow) {
+	fmt.Println("| IP | HOSTNAME | PWND | TAG | PORTS |")
+	fmt.Println("|---|---|---|---|---|")
+	for _, h := range hosts {
+		pwnd := "✗"
+		if h.Pwned {
+			pwnd = "✓"
+		}
+		fmt.Printf("| %s | %s | %s | %s | %s |\n",
+			h.IP, dash(h.Hostname), pwnd, dash(h.Tag), formatPortsMD(h.Ports))
 	}
+}
+
+func printHostsJSON(hosts []dbpkg.HostRow) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(hosts)
+}
+
+// formatPorts renders port list as a compact inline string for terminal output.
+// Example: 80/tcp(http)  │  443/tcp(https)  │  3389/tcp(rdp)
+func formatPorts(ports []dbpkg.PortInfo) string {
+	if len(ports) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(ports))
+	for _, p := range ports {
+		entry := fmt.Sprintf("%d/%s", p.Port, p.Protocol)
+		if p.Service != "" {
+			entry += "(" + p.Service + ")"
+		}
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, "  │  ")
+}
+
+// formatPortsMD renders ports for markdown (no pipes to avoid table breakage).
+func formatPortsMD(ports []dbpkg.PortInfo) string {
+	if len(ports) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(ports))
+	for _, p := range ports {
+		entry := fmt.Sprintf("%d/%s", p.Port, p.Protocol)
+		if p.Service != "" {
+			entry += "(" + p.Service + ")"
+		}
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, ", ")
 }

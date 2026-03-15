@@ -17,6 +17,7 @@ var (
 	editOSGuess    string
 	editProject    string
 	editHostSource string
+	editPwned      bool
 	editService    string
 	editVersion    string
 	editState      string
@@ -46,6 +47,7 @@ func init() {
 	editCmd.Flags().StringVar(&editOSGuess, "os-guess", "", "Set or clear OS guess")
 	editCmd.Flags().StringVar(&editProject, "project", "", "Set or clear project")
 	editCmd.Flags().StringVar(&editHostSource, "host-source", "", "Set or clear host source")
+	editCmd.Flags().BoolVar(&editPwned, "pwned", false, "Set host pwned status (--pwned or --pwned=false)")
 
 	editCmd.Flags().StringVar(&editService, "service", "", "Set or clear port service")
 	editCmd.Flags().StringVar(&editVersion, "version", "", "Set or clear port version")
@@ -65,6 +67,9 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	setStringUpdate(cmd, "os-guess", editOSGuess, &hostUpdate.OSGuess)
 	setStringUpdate(cmd, "project", editProject, &hostUpdate.Project)
 	setStringUpdate(cmd, "host-source", editHostSource, &hostUpdate.Source)
+	if cmd.Flags().Changed("pwned") {
+		hostUpdate.Pwned = &editPwned
+	}
 
 	setStringUpdate(cmd, "service", editService, &portUpdate.Service)
 	setStringUpdate(cmd, "version", editVersion, &portUpdate.Version)

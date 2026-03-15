@@ -184,13 +184,12 @@ net-scan list --markdown
 
 **Example output:**
 ```
-IP               HOSTNAME    TAG                    PORT   PROTO  SERVICE   VERSION         SOURCE
-192.168.1.10     DC01        DC, Windows, LDAP     88     tcp    kerberos  -               nmap, WEB05
-192.168.1.10     DC01        DC, Windows, LDAP     389    tcp    ldap      -               nmap
-192.168.1.10     DC01        DC, Windows, LDAP     445    tcp    smb       Windows SMB     nmap
-192.168.1.11     SQL27       Windows, MSSQL        1433   tcp    mssql     MSSQL 2019      WEB05
-192.168.1.11     SQL27       Windows, MSSQL        3389   tcp    rdp       -               nmap
+IP               HOSTNAME   PWND  TAG                   PORTS
+192.168.1.10     DC01        -    DC, Windows, LDAP     88/tcp(kerberos)  │  389/tcp(ldap)  │  445/tcp(smb)
+192.168.1.11     SQL27       ✓    Windows, MSSQL        1433/tcp(mssql)  │  3389/tcp(rdp)
 ```
+
+Pwned host hostnames are shown in **red** in the terminal. Use `net-scan edit --host <IP> --pwned` to mark a host as pwned, and `--pwned=false` to clear it.
 
 **Flags:**
 ```
@@ -226,6 +225,7 @@ net-scan edit --host 10.10.10.10 --port 445 --service smb --version "Windows SMB
     --protocol      Port protocol for port-level edits (default: tcp)
     --hostname      Set or clear hostname
     --tag           Set or clear a manual host tag (comma-separated allowed)
+    --pwned         Set host pwned status (--pwned or --pwned=false)
     --os-guess      Set or clear OS guess
     --project       Set or clear project
     --host-source   Set or clear host source
