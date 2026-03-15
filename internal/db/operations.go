@@ -236,8 +236,9 @@ func GetHostID(db *sql.DB, ip string) (int64, error) {
 }
 
 type hostFingerprint struct {
-	ports    map[int]struct{}
-	services []string
+	ports     map[int]struct{}
+	services  []string
+	manualTag string
 }
 
 func applyHostTags(db *sql.DB, rows []ListRow) error {
@@ -253,9 +254,10 @@ func applyHostTags(db *sql.DB, rows []ListRow) error {
 	}
 
 	query := fmt.Sprintf(`
-		SELECT h.ip, op.port, LOWER(COALESCE(op.service, ''))
+		SELECT h.ip, op.port, LOWER(COALESCE(op.service, '')), COALESCE(hm.manual_tag, '')
 		FROM open_ports op
 		JOIN hosts h ON op.host_id = h.id
+		LEFT JOIN host_metadata hm ON hm.host_id = h.id
 		WHERE op.state = 'open' AND h.ip IN (%s)
 	`, placeholders)
 
@@ -270,7 +272,8 @@ func applyHostTags(db *sql.DB, rows []ListRow) error {
 		var ip string
 		var port int
 		var service string
-		if err := tagRows.Scan(&ip, &port, &service); err != nil {
+		var manualTag string
+		if err := tagRows.Scan(&ip, &port, &service, &manualTag); err != nil {
 			return fmt.Errorf("scan host tag row: %w", err)
 		}
 
@@ -284,6 +287,9 @@ func applyHostTags(db *sql.DB, rows []ListRow) error {
 		}
 		if service != "" {
 			fp.services = append(fp.services, service)
+		}
+		if manualTag != "" {
+			fp.manualTag = manualTag
 		}
 	}
 	if err := tagRows.Err(); err != nil {
@@ -320,61 +326,64 @@ func classifyTags(fp *hostFingerprint) string {
 	}
 
 	var tags []string
+	for _, manualTag := range splitTagValues(fp.manualTag) {
+		tags = appendUniqueTags(tags, manualTag)
+	}
 
 	if hasAllPorts(fp, 88, 389) {
-		tags = append(tags, "DC")
+		tags = appendUniqueTags(tags, "DC")
 	}
 	if hasAnyPort(fp, 3389, 5985, 5986, 445, 135, 139) ||
 		hasAnyService(fp, "microsoft-ds", "msrpc", "ms-wbt-server", "winrm", "smb") {
-		tags = append(tags, "Windows")
+		tags = appendUniqueTags(tags, "Windows")
 	}
 	if hasAnyPort(fp, 22) || hasAnyService(fp, "ssh") {
-		tags = append(tags, "Linux")
+		tags = appendUniqueTags(tags, "Linux")
 	}
 	if hasAnyPort(fp, 80, 443, 8080, 8443) || hasAnyService(fp, "http", "https") {
-		tags = append(tags, "HTTP")
+		tags = appendUniqueTags(tags, "HTTP")
 	}
 	if hasAnyPort(fp, 1433, 1434) || hasAnyService(fp, "mssql", "ms-sql") {
-		tags = append(tags, "MSSQL")
+		tags = appendUniqueTags(tags, "MSSQL")
 	}
 	if hasAnyPort(fp, 53) || hasAnyService(fp, "domain", "dns") {
-		tags = append(tags, "DNS")
+		tags = appendUniqueTags(tags, "DNS")
 	}
 	if hasAnyPort(fp, 389, 636, 3268, 3269) || hasAnyService(fp, "ldap") {
-		tags = append(tags, "LDAP")
+		tags = appendUniqueTags(tags, "LDAP")
 	}
 	if hasAnyPort(fp, 20, 21) || hasAnyService(fp, "ftp") {
-		tags = append(tags, "FTP")
+		tags = appendUniqueTags(tags, "FTP")
 	}
 	if hasAnyPort(fp, 25, 465, 587) || hasAnyService(fp, "smtp") {
-		tags = append(tags, "SMTP")
+		tags = appendUniqueTags(tags, "SMTP")
 	}
 	if hasAnyPort(fp, 110, 995) || hasAnyService(fp, "pop3") {
-		tags = append(tags, "POP3")
+		tags = appendUniqueTags(tags, "POP3")
 	}
 	if hasAnyPort(fp, 143, 993) || hasAnyService(fp, "imap") {
-		tags = append(tags, "IMAP")
+		tags = appendUniqueTags(tags, "IMAP")
 	}
 	if hasAnyPort(fp, 111, 2049) || hasAnyService(fp, "nfs", "rpcbind") {
-		tags = append(tags, "NFS")
+		tags = appendUniqueTags(tags, "NFS")
 	}
 	if hasAnyPort(fp, 3306) || hasAnyService(fp, "mysql", "mariadb") {
-		tags = append(tags, "MYSQL")
+		tags = appendUniqueTags(tags, "MYSQL")
 	}
 	if hasAnyPort(fp, 5432) || hasAnyService(fp, "postgres") {
-		tags = append(tags, "POSTGRES")
+		tags = appendUniqueTags(tags, "POSTGRES")
 	}
 	if hasAnyPort(fp, 6379) || hasAnyService(fp, "redis") {
-		tags = append(tags, "REDIS")
+		tags = appendUniqueTags(tags, "REDIS")
 	}
 	if hasAnyPort(fp, 1521) || hasAnyService(fp, "oracle") {
-		tags = append(tags, "ORACLE")
+		tags = appendUniqueTags(tags, "ORACLE")
 	}
 	if hasAnyVNC(fp) || hasAnyService(fp, "vnc") {
-		tags = append(tags, "VNC")
+		tags = appendUniqueTags(tags, "VNC")
 	}
 	if hasAnyPort(fp, 161, 162) || hasAnyService(fp, "snmp") {
-		tags = append(tags, "SNMP")
+		tags = appendUniqueTags(tags, "SNMP")
 	}
 
 	if len(tags) == 0 {
@@ -420,4 +429,36 @@ func hasAnyVNC(fp *hostFingerprint) bool {
 		}
 	}
 	return false
+}
+
+func splitTagValues(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		tag := strings.TrimSpace(part)
+		if tag == "" {
+			continue
+		}
+		out = append(out, tag)
+	}
+	return out
+}
+
+func appendUniqueTags(tags []string, candidate string) []string {
+	if candidate == "" {
+		return tags
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(candidate))
+	for _, existing := range tags {
+		if strings.ToLower(strings.TrimSpace(existing)) == normalized {
+			return tags
+		}
+	}
+
+	return append(tags, candidate)
 }

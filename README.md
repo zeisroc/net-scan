@@ -204,6 +204,41 @@ IP               HOSTNAME    TAG                    PORT   PROTO  SERVICE   VERS
 
 ---
 
+### `edit` — Edit host or port metadata
+
+Use `edit` to update stored database values without re-running a scan.
+
+```bash
+# Add or change a hostname and a manual tag
+net-scan edit --host 10.10.10.10 --hostname DC01 --tag Prod
+
+# Update host metadata
+net-scan edit --host 10.10.10.10 --project corp --os-guess "Windows Server 2022"
+
+# Update a specific stored port entry
+net-scan edit --host 10.10.10.10 --port 445 --service smb --version "Windows SMB" --port-source manual
+```
+
+**Flags:**
+```
+    --host          Exact host IP to edit (required)
+-p, --port          Port number for port-level edits
+    --protocol      Port protocol for port-level edits (default: tcp)
+    --hostname      Set or clear hostname
+    --tag           Set or clear a manual host tag (comma-separated allowed)
+    --os-guess      Set or clear OS guess
+    --project       Set or clear project
+    --host-source   Set or clear host source
+    --service       Set or clear port service
+    --version       Set or clear port version
+    --state         Set or clear port state
+    --port-source   Set or clear port source
+```
+
+Manual tags are additive and are shown together with the auto-derived tags in `net-scan list`.
+
+---
+
 ### `export` — Export for other tools
 
 ```bash
@@ -240,7 +275,7 @@ net-scan export --project corp-internal --format targets-file
 net-scan/
 ├── cmd/net-scan/main.go
 ├── internal/
-│   ├── cli/          # cobra commands (root, scan, ingest, list, export)
+│   ├── cli/          # cobra commands (root, scan, ingest, list, edit, export)
 │   ├── db/           # SQLite init, schema, upsert/query operations
 │   ├── models/       # Host, OpenPort structs
 │   ├── parser/       # nmap XML + SharpScan parsers

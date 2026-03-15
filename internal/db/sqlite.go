@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS open_ports (
     scanned_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(host_id, port, protocol)
 );
+
+CREATE TABLE IF NOT EXISTS host_metadata (
+    host_id      INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
+    manual_tag   TEXT,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 // Open opens (or creates) the SQLite database at the given path,
