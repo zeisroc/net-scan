@@ -1,8 +1,8 @@
-# Plan: network-scanner
+# Plan: net-scan
 
-> **Repo:** New repository (to be created)  
+> **Repo:** `pwnbox_modules/net_scan`  
 > **Language:** Go  
-> **Binary name:** `network-scanner`  
+> **Binary name:** `net-scan`  
 > **DB path:** `~/.pwnbox/network.db`
 
 ---
@@ -52,14 +52,14 @@ CREATE TABLE IF NOT EXISTS open_ports (
 
 ### Top-level command
 ```
-network-scanner [command] [flags]
+net-scan [command] [flags]
 ```
 
 ### Subcommands
 
 #### `scan` — Run nmap against a target
 ```
-network-scanner scan --target <IP|CIDR|file> [flags]
+net-scan scan --target <IP|CIDR|file> [flags]
 ```
 
 **Flags:**
@@ -75,14 +75,19 @@ network-scanner scan --target <IP|CIDR|file> [flags]
 ```
 
 **Scan pipeline (default `--full`):**
-1. **Phase 1 — All ports:** `nmap -p- --min-rate 5000 -oX <tmp.xml> <target>`
+1. **Phase 1 — All ports:** `nmap -p- -v --min-rate 5000 -oX <tmp.xml> <target>`
+   - When `--proxy` is set, `-sT` (TCP connect scan) is added automatically — SYN scans
+     require raw sockets and cannot be routed through a SOCKS proxy via proxychains.
    - Parse open ports from XML
    - Write hosts + open_ports to DB (source: 'nmap', service: null)
-   - IP:PORT should be printed to the screen during the scan when there is a new open ports (usefull to start working quickly)
+   - IP:PORT should be printed to the screen during the scan when there is a new open ports (useful to start working quickly)
 2. **Phase 2 — Service detection:** `nmap -p <open_ports> -sV -sC -oX <sV.xml> <target>`
    - Re-parse and update existing open_ports rows with `service` and `version`
    - Update `hosts.os_guess` if OS detection data is present
-3. Print a summary table at the end: host → open ports with services. The view should be compact !
+   - The `smb-os-discovery` NSE script (run via `-sC` when port 445 is open) leaks the
+     NetBIOS computer name and domain. Hostname is populated from the `server` elem of
+     this script, taking priority over reverse DNS PTR records for Windows machines.
+3. Print a summary table at the end: host → open ports with services.
 
 **XML parsing:** Use Go's `encoding/xml` to parse nmap XML output (`<nmaprun>` → `<host>` → `<ports>` → `<port>`).
 
@@ -93,7 +98,7 @@ network-scanner scan --target <IP|CIDR|file> [flags]
 #### `ingest` — Import scanner output from victim machines
 
 ```
-network-scanner ingest [flags]
+net-scan ingest [flags]
 ```
 
 **Supported input formats:**
@@ -127,7 +132,7 @@ network-scanner ingest [flags]
 #### `list` — Query the database
 
 ```
-network-scanner list [flags]
+net-scan list [flags]
 ```
 
 **Flags:**
@@ -155,7 +160,7 @@ IP               HOSTNAME    PORT   PROTO  SERVICE   VERSION      SOURCE
 #### `export` — Export hosts/ports for use by other tools
 
 ```
-network-scanner export [flags]
+net-scan export [flags]
 ```
 
 **Flags:**
@@ -174,7 +179,7 @@ network-scanner export [flags]
 **Example:**
 ```bash
 # Get all hosts with MSSQL open → feed into credops
-network-scanner export --service mssql --format targets-file > mssql_targets.txt
+net-scan export --service mssql --format targets-file > mssql_targets.txt
 credops creds test -t mssql_targets.txt -P mssql
 ```
 
@@ -183,9 +188,9 @@ credops creds test -t mssql_targets.txt -P mssql
 ## Project Structure
 
 ```
-network-scanner/
+net-scan/
 ├── cmd/
-│   └── network-scanner/
+│   └── net-scan/
 │       └── main.go
 ├── internal/
 │   ├── cli/
@@ -193,17 +198,21 @@ network-scanner/
 │   │   ├── scan.go
 │   │   ├── ingest.go
 │   │   ├── list.go
+│   │   ├── edit.go
+│   │   ├── add.go
 │   │   └── export.go
 │   ├── db/
 │   │   ├── sqlite.go      -- DB init, schema creation, ~/.pwnbox/ dir setup
-│   │   └── operations.go  -- UpsertHost, UpsertPort, ListHosts, ListPorts
+│   │   ├── operations.go  -- UpsertHost, UpsertPort, ListHosts, ListPorts, tag classification
+│   │   └── edit.go        -- UpdateHost, UpdatePort
 │   ├── parser/
-│   │   ├── nmap_xml.go    -- Parse nmap XML output
+│   │   ├── nmap_xml.go    -- Parse nmap XML output (including smb-os-discovery hostscripts)
 │   │   └── sharpscan.go   -- Parse SharpScan text output
 │   ├── runner/
-│   │   └── nmap.go        -- Exec nmap, capture XML, call parser
+│   │   └── nmap.go        -- Exec nmap, capture XML, call parser; -sT auto-applied with --proxy
 │   └── models/
 │       └── models.go      -- Host, OpenPort structs
+├── Makefile
 ├── go.mod
 └── README.md
 ```
@@ -212,11 +221,11 @@ network-scanner/
 
 ## Integration Points
 
-| Consumer | How it uses network-scanner |
+| Consumer | How it uses net-scan |
 |---|---|
 | `credops` | Reads `~/.pwnbox/network.db` → filters protocol tests to open ports only |
-| `pwnbox-tools` | Calls `network-scanner scan` as subprocess; displays results in unified dashboard |
-| Manual workflow | `network-scanner export --service mssql` → pipe into nxc or credops |
+| `pwnbox-tools` | Calls `net-scan scan` as subprocess; displays results in unified dashboard |
+| Manual workflow | `net-scan export --service mssql` → pipe into nxc or credops |
 
 ---
 

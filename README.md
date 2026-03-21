@@ -53,9 +53,11 @@ These flags are available on every command:
 Two-phase pipeline under `sudo`:
 
 1. **Phase 1** — `nmap -p- -v --min-rate 5000` — discovers all open TCP ports  
-   By default only `Discovered open port` lines are printed live. Use `-v` for full nmap output.
+   By default only `Discovered open port` lines are printed live. Use `-v` for full nmap output.  
+   When `--proxy` is used, `-sT` (TCP connect scan) is automatically added — SYN scans require raw sockets that cannot be routed through a SOCKS proxy.
 2. **Phase 2** — `nmap -p <ports> -sV -sC` on the exact ports found per host — enriches with service/version data  
-   Silent by default; use `-v` for full output. Results are strictly filtered to ports confirmed in Phase 1 — Phase 2 cannot introduce new ports.
+   Silent by default; use `-v` for full output. Results are strictly filtered to ports confirmed in Phase 1 — Phase 2 cannot introduce new ports.  
+   When port 445 is open, the `smb-os-discovery` script (included via `-sC`) extracts the Windows machine name and OS directly from SMB — more reliable than reverse DNS for AD environments.
 
 ```bash
 # Full scan (default)
@@ -184,12 +186,23 @@ net-scan list --markdown
 
 **Example output:**
 ```
-IP               HOSTNAME   PWND  TAG                   PORTS
-192.168.1.10     DC01        -    DC, Windows, LDAP     88/tcp(kerberos)  │  389/tcp(ldap)  │  445/tcp(smb)
-192.168.1.11     SQL27       ✓    Windows, MSSQL        1433/tcp(mssql)  │  3389/tcp(rdp)
+  4 host(s)  ·  11 open port(s)
+  ────────────────────────────────────────────────────────────────────────
+  192.168.1.10       DC01                        [DC · Windows · LDAP]  · corp-internal
+  ├─  88/tcp          kerberos
+  ├─  389/tcp         ldap
+  ├─  445/tcp         microsoft-ds      Windows Server 2019
+  └─  3389/tcp        ms-wbt-server
+
+  ────────────────────────────────────────────────────────────────────────
+  192.168.1.11       SQL27  ☠  PWNED           [Windows · MSSQL]  · corp-internal
+  ├─  445/tcp         microsoft-ds
+  ├─  1433/tcp        mssql             Microsoft SQL Server 2019 RTM
+  └─  3389/tcp        ms-wbt-server
+  ────────────────────────────────────────────────────────────────────────
 ```
 
-Pwned host hostnames are shown in **red** in the terminal. Use `net-scan edit --host <IP> --pwned` to mark a host as pwned, and `--pwned=false` to clear it.
+Each host is rendered as a card. In the terminal, IPs are **bold cyan**, pwned hostnames are **bold red** with a `☠  PWNED` marker, tags appear in **yellow** brackets, and service names are **green**. Use `net-scan edit --host <IP> --pwned` to mark a host as pwned, and `--pwned=false` to clear it.
 
 **Flags:**
 ```

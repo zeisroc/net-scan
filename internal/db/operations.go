@@ -462,7 +462,7 @@ func distinctSortedIPs(rows []ListRow) []string {
 
 func classifyTags(fp *hostFingerprint) string {
 	if fp == nil {
-		return "UNKNOW"
+		return "UNKNOWN"
 	}
 
 	var tags []string
@@ -527,7 +527,7 @@ func classifyTags(fp *hostFingerprint) string {
 	}
 
 	if len(tags) == 0 {
-		return "UNKNOW"
+		return "UNKNOWN"
 	}
 
 	return strings.Join(tags, ", ")

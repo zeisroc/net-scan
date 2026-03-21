@@ -73,7 +73,14 @@ func (r *NmapRunner) RunAllPorts(target string) (string, error) {
 	}
 	xmlPath := r.xmlPathFromLabel(label, "phase1")
 	// -v makes nmap emit "Discovered open port" lines as it scans.
-	nmapArgs := append([]string{"-p-", "-v", fmt.Sprintf("--min-rate=%d", r.MinRate), "-oX", xmlPath}, tArgs...)
+	// -sT (TCP connect) is required when routing through proxychains; SYN scans use raw
+	// sockets that bypass the SOCKS stack and produce no results through a proxy.
+	nmapArgs := []string{"-p-", "-v", fmt.Sprintf("--min-rate=%d", r.MinRate)}
+	if r.Proxy != "" {
+		nmapArgs = append(nmapArgs, "-sT")
+	}
+	nmapArgs = append(nmapArgs, "-oX", xmlPath)
+	nmapArgs = append(nmapArgs, tArgs...)
 	return xmlPath, r.run(r.buildArgs(nmapArgs), true)
 }
 
@@ -90,7 +97,12 @@ func (r *NmapRunner) RunServiceDetection(target, ports string) (string, error) {
 		return "", err
 	}
 	xmlPath := r.xmlPathFromLabel(label, "phase2")
-	nmapArgs := append([]string{"-p", ports, "-sV", "-sC", "-oX", xmlPath}, tArgs...)
+	nmapArgs := []string{"-p", ports, "-sV", "-sC"}
+	if r.Proxy != "" {
+		nmapArgs = append(nmapArgs, "-sT")
+	}
+	nmapArgs = append(nmapArgs, "-oX", xmlPath)
+	nmapArgs = append(nmapArgs, tArgs...)
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }
 
@@ -107,7 +119,11 @@ func (r *NmapRunner) RunVersionDetection(target string, tcpPorts, udpPorts []int
 	}
 
 	xmlPath := r.xmlPathFromLabel(label, "version")
-	nmapArgs := append(extraArgs, "-sV", "-p", portArg, "-oX", xmlPath)
+	nmapArgs := append(extraArgs, "-sV", "-p", portArg)
+	if r.Proxy != "" {
+		nmapArgs = append(nmapArgs, "-sT")
+	}
+	nmapArgs = append(nmapArgs, "-oX", xmlPath)
 	nmapArgs = append(nmapArgs, tArgs...)
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }

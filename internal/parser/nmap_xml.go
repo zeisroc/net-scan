@@ -17,11 +17,12 @@ type nmapRun struct {
 }
 
 type nmapHost struct {
-	Status    nmapStatus    `xml:"status"`
-	Addresses []nmapAddress `xml:"address"`
-	Hostnames nmapHostnames `xml:"hostnames"`
-	Ports     nmapPorts     `xml:"ports"`
-	OS        nmapOS        `xml:"os"`
+	Status      nmapStatus      `xml:"status"`
+	Addresses   []nmapAddress   `xml:"address"`
+	Hostnames   nmapHostnames   `xml:"hostnames"`
+	Ports       nmapPorts       `xml:"ports"`
+	OS          nmapOS          `xml:"os"`
+	HostScripts nmapHostScripts `xml:"hostscript"`
 }
 
 type nmapStatus struct {
@@ -72,6 +73,20 @@ type nmapOSMatch struct {
 	Name string `xml:"name,attr"`
 }
 
+type nmapHostScripts struct {
+	Scripts []nmapScript `xml:"script"`
+}
+
+type nmapScript struct {
+	ID    string     `xml:"id,attr"`
+	Elems []nmapElem `xml:"elem"`
+}
+
+type nmapElem struct {
+	Key   string `xml:"key,attr"`
+	Value string `xml:",chardata"`
+}
+
 // ParseNmapXMLFile parses an nmap XML file and returns hosts with open ports.
 func ParseNmapXMLFile(path, source string) ([]models.Host, error) {
 	f, err := os.Open(path)
@@ -115,6 +130,31 @@ func ParseNmapXML(r io.Reader, source string) ([]models.Host, error) {
 
 		if len(h.OS.Matches) > 0 {
 			host.OSGuess = h.OS.Matches[0].Name
+		}
+
+		// smb-os-discovery script (runs via -sC when port 445 is open) leaks the
+		// NetBIOS computer name and OS string directly from the Windows machine.
+		// This is more reliable than reverse DNS for Windows hosts in AD environments.
+		for _, script := range h.HostScripts.Scripts {
+			if script.ID != "smb-os-discovery" {
+				continue
+			}
+			elems := make(map[string]string, len(script.Elems))
+			for _, e := range script.Elems {
+				elems[e.Key] = e.Value
+			}
+			// Prefer short computer name (e.g. "DC01"); fall back to FQDN.
+			if name := elems["server"]; name != "" {
+				host.Hostname = name
+			} else if fqdn := elems["fqdn"]; fqdn != "" && host.Hostname == "" {
+				host.Hostname = fqdn
+			}
+			// Use SMB OS string when nmap's -O detection produced nothing.
+			if host.OSGuess == "" {
+				if osStr := elems["os"]; osStr != "" {
+					host.OSGuess = osStr
+				}
+			}
 		}
 
 		for _, p := range h.Ports.Ports {
