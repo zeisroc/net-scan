@@ -120,6 +120,36 @@ net-scan scan version --output-dir /tmp/scans
 
 ---
 
+#### `scan enrich` — Run Phase 2 on hosts without version data
+
+Useful after importing SharpScan output (or any Phase-1-only scan): runs the full
+Phase 2 pipeline (`nmap -p <ports> -sV -sC`) against each host that has not yet had
+service detection performed. On success the host is marked `phase2_done = 1` in the DB.
+
+```bash
+# Enrich all unenriched hosts (phase2_done = 0)
+net-scan scan enrich
+
+# Only enrich hosts from a specific project
+net-scan scan enrich --project corp-internal
+
+# Route through a SOCKS5 proxy
+net-scan scan enrich --proxy 127.0.0.1:1080
+
+# Re-run Phase 2 on every host regardless of prior enrichment
+net-scan scan enrich --all
+```
+
+**Flags:**
+```
+    --proxy        SOCKS5 host:port (via proxychains)
+    --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
+    --project      Only enrich hosts from this project
+    --all          Re-run Phase 2 even on already-enriched hosts
+```
+
+---
+
 ### `ingest` — Import scanner output from victim machines
 
 Import [SharpScan](https://github.com/7own/SharpScan) output or raw nmap XML collected from pivot machines.

@@ -23,6 +23,9 @@ var (
 	scanProxy     string
 	scanOutputDir string
 	scanThreads   int
+
+	enrichProject string
+	enrichAll     bool
 )
 
 var scanCmd = &cobra.Command{
@@ -54,6 +57,21 @@ executes sudo nmap -sV against those exact ports. No discovery phase is run.`,
 	RunE:    runScanVersion,
 }
 
+var scanEnrichCmd = &cobra.Command{
+	Use:   "enrich",
+	Short: "Run Phase 2 (-sV -sC) against hosts not yet enriched",
+	Long: `Runs Phase 2 service/version detection against hosts ingested without it.
+
+Queries the database for hosts where phase2_done = 0 (e.g. hosts imported
+via SharpScan or Phase-1-only scans), groups their TCP ports per host, then
+executes sudo nmap -p <ports> -sV -sC per host — identical to the Phase 2
+step of a full scan. On success, the host is marked phase2_done = 1.
+
+Use --all to re-run Phase 2 even on hosts already marked as enriched.`,
+	PreRunE: openDB,
+	RunE:    runScanEnrich,
+}
+
 func init() {
 	home, _ := os.UserHomeDir()
 	defaultOut := filepath.Join(home, ".pwnbox", "scans")
@@ -69,7 +87,13 @@ func init() {
 	scanVersionCmd.Flags().StringVar(&scanProxy, "proxy", "", "SOCKS5 proxy host:port (via proxychains)")
 	scanVersionCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
 
+	scanEnrichCmd.Flags().StringVar(&scanProxy, "proxy", "", "SOCKS5 proxy host:port (via proxychains)")
+	scanEnrichCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
+	scanEnrichCmd.Flags().StringVar(&enrichProject, "project", "", "Only enrich hosts belonging to this project")
+	scanEnrichCmd.Flags().BoolVar(&enrichAll, "all", false, "Re-run Phase 2 even on already-enriched hosts")
+
 	scanCmd.AddCommand(scanVersionCmd)
+	scanCmd.AddCommand(scanEnrichCmd)
 	rootCmd.AddCommand(scanCmd)
 }
 
@@ -133,6 +157,14 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	if _, err := dbpkg.UpsertHosts(gDB, hosts2); err != nil {
 		return fmt.Errorf("save phase2 results: %w", err)
+	}
+
+	// Mark every host from phase 1 as enriched — phase 2 was run against the
+	// full target, covering all hosts discovered in phase 1.
+	for _, h := range hosts {
+		if err := dbpkg.MarkPhase2Done(gDB, h.IP); err != nil {
+			fmt.Printf("[!] Could not mark phase2_done for %s: %v\n", h.IP, err)
+		}
 	}
 
 	printHostsSummary(hosts2)
@@ -209,6 +241,86 @@ func runScanVersion(cmd *cobra.Command, args []string) error {
 
 	if len(refreshed) == 0 {
 		fmt.Println("[i] No hosts were refreshed.")
+	}
+
+	return nil
+}
+
+func runScanEnrich(cmd *cobra.Command, args []string) error {
+	rows, err := dbpkg.ListUnenrichedTargets(gDB, enrichProject, enrichAll)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		if enrichAll {
+			fmt.Println("[i] No stored TCP ports found.")
+		} else {
+			fmt.Println("[i] No unenriched hosts found. All hosts already have phase2_done = 1.")
+			fmt.Println("    Use --all to re-run Phase 2 on all hosts regardless.")
+		}
+		return nil
+	}
+
+	hosts := groupVersionTargets(rows)
+	if len(hosts) == 0 {
+		fmt.Println("[i] No valid stored ports found.")
+		return nil
+	}
+
+	r := &runner.NmapRunner{
+		OutputDir: scanOutputDir,
+		Proxy:     scanProxy,
+		Debug:     debug,
+		Verbose:   verbose,
+	}
+
+	var enriched []models.Host
+	var failures []string
+
+	for _, host := range hosts {
+		portList := strings.Join(intSliceToStrings(host.TCPPorts), ",")
+		fmt.Printf("\n\033[1m[*] Enrich (Phase 2) — %s (%d tcp port(s))\033[0m\n\n", host.IP, len(host.TCPPorts))
+
+		xmlPath, err := r.RunServiceDetection(host.IP, portList)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", host.IP, err))
+			fmt.Printf("[!] Failed to scan %s: %v\n", host.IP, err)
+			continue
+		}
+
+		parsed, err := parser.ParseNmapXMLFile(xmlPath, "nmap")
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: parse xml: %v", host.IP, err))
+			fmt.Printf("[!] Failed to parse results for %s: %v\n", host.IP, err)
+			continue
+		}
+
+		filterToKnownPorts(parsed, host.portSet())
+		applyProject(parsed, host.Project)
+
+		if _, err := dbpkg.UpsertHosts(gDB, parsed); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: save results: %v", host.IP, err))
+			fmt.Printf("[!] Failed to save results for %s: %v\n", host.IP, err)
+			continue
+		}
+
+		if err := dbpkg.MarkPhase2Done(gDB, host.IP); err != nil {
+			fmt.Printf("[!] Could not mark phase2_done for %s: %v\n", host.IP, err)
+		}
+
+		enriched = append(enriched, parsed...)
+	}
+
+	if len(enriched) > 0 {
+		printHostsSummary(enriched)
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("enrich failed for %d host(s): %s", len(failures), strings.Join(failures, "; "))
+	}
+
+	if len(enriched) == 0 {
+		fmt.Println("[i] No hosts were enriched.")
 	}
 
 	return nil
@@ -403,4 +515,12 @@ func portKey(ip, protocol string, port int) string {
 		proto = "tcp"
 	}
 	return ip + "|" + proto + "|" + strconv.Itoa(port)
+}
+
+func intSliceToStrings(ints []int) []string {
+	out := make([]string, len(ints))
+	for i, v := range ints {
+		out[i] = strconv.Itoa(v)
+	}
+	return out
 }

@@ -57,7 +57,40 @@ func UpsertHost(db *sql.DB, h models.Host) (int64, error) {
 	return id, nil
 }
 
-// UpsertPort inserts or updates an open_ports record.
+// AddHost creates a minimal host record (IP + source "manual"). Returns true if the
+// row already existed (in which case project is refreshed if provided).
+func AddHost(db *sql.DB, h models.Host) (existed bool, err error) {
+	// Check if host already exists.
+	var existingID int64
+	lookupErr := db.QueryRow(`SELECT id FROM hosts WHERE ip = ?`, h.IP).Scan(&existingID)
+	existed = lookupErr == nil
+
+	_, err = db.Exec(`
+		INSERT INTO hosts (ip, hostname, os_guess, source, project)
+		VALUES (?, '', '', ?, ?)
+		ON CONFLICT(ip) DO UPDATE SET
+			source  = hosts.source,  -- merged below
+			project = CASE WHEN excluded.project != '' THEN excluded.project ELSE hosts.project END,
+			updated_at = CURRENT_TIMESTAMP
+	`, h.IP, h.Source, h.Project)
+	if err != nil {
+		return false, fmt.Errorf("add host %s: %w", h.IP, err)
+	}
+
+	// Merge "manual" into source if it wasn't already there.
+	var currentSource string
+	if err := db.QueryRow(`SELECT source FROM hosts WHERE ip = ?`, h.IP).Scan(&currentSource); err != nil {
+		return existed, fmt.Errorf("fetch host %s: %w", h.IP, err)
+	}
+	merged := MergeSource(currentSource, h.Source)
+	if merged != currentSource {
+		if _, err := db.Exec(`UPDATE hosts SET source = ? WHERE ip = ?`, merged, h.IP); err != nil {
+			return existed, fmt.Errorf("update source %s: %w", h.IP, err)
+		}
+	}
+	return existed, nil
+}
+
 func UpsertPort(db *sql.DB, hostID int64, p models.OpenPort) error {
 	_, err := db.Exec(`
 		INSERT INTO open_ports (host_id, port, protocol, state, service, version, source)
@@ -209,13 +242,16 @@ func ListPorts(db *sql.DB, f PortFilter) ([]ListRow, error) {
 // ListHosts queries hosts and their ports applying the same filters as ListPorts,
 // but returns one HostRow per host with all matching ports grouped together.
 func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
+	// Use LEFT JOIN so hosts with no ports (e.g. added via "add" before scanning)
+	// still appear. When op.port is NULL the port filter conditions must be skipped.
 	query := `
 		SELECT h.ip, COALESCE(h.hostname,''),
 		       COALESCE(hm.pwned, 0),
-		       op.port, op.protocol,
-		       COALESCE(op.service,''), COALESCE(op.version,''), op.source, COALESCE(h.project,'')
-		FROM open_ports op
-		JOIN hosts h ON op.host_id = h.id
+		       op.port, COALESCE(op.protocol,''),
+		       COALESCE(op.service,''), COALESCE(op.version,''),
+		       COALESCE(op.source,''), COALESCE(h.project,'')
+		FROM hosts h
+		LEFT JOIN open_ports op ON op.host_id = h.id
 		LEFT JOIN host_metadata hm ON hm.host_id = h.id
 		WHERE 1=1`
 	var args []any
@@ -249,7 +285,8 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 
 	for rows.Next() {
 		var ip, hostname, protocol, service, version, source, project string
-		var pwnedInt, port int
+		var pwnedInt int
+		var port sql.NullInt64
 		if err := rows.Scan(&ip, &hostname, &pwnedInt, &port, &protocol,
 			&service, &version, &source, &project); err != nil {
 			return nil, fmt.Errorf("scan host row: %w", err)
@@ -266,13 +303,16 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 			grouped[ip] = host
 			order = append(order, ip)
 		}
-		host.Ports = append(host.Ports, PortInfo{
-			Port:     port,
-			Protocol: protocol,
-			Service:  service,
-			Version:  version,
-			Source:   source,
-		})
+		// port is NULL for hosts that have no open_ports rows yet.
+		if port.Valid {
+			host.Ports = append(host.Ports, PortInfo{
+				Port:     int(port.Int64),
+				Protocol: protocol,
+				Service:  service,
+				Version:  version,
+				Source:   source,
+			})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -335,6 +375,60 @@ func GetHostID(db *sql.DB, ip string) (int64, error) {
 		return 0, nil
 	}
 	return id, err
+}
+
+// ListUnenrichedTargets returns stored open TCP ports for hosts that have not yet had
+// Phase 2 (service/version detection) run against them.
+// When all is true, all hosts are returned regardless of phase2_done status.
+// When project is non-empty, only hosts belonging to that project are included.
+func ListUnenrichedTargets(db *sql.DB, project string, all bool) ([]VersionTargetRow, error) {
+	query := `
+		SELECT h.ip,
+		       COALESCE(h.hostname, ''),
+		       op.port,
+		       LOWER(op.protocol),
+		       COALESCE(h.project, '')
+		FROM open_ports op
+		JOIN hosts h ON op.host_id = h.id
+		WHERE op.state = 'open'
+		AND LOWER(op.protocol) = 'tcp'`
+	var args []any
+	if !all {
+		query += ` AND h.phase2_done = 0`
+	}
+	if project != "" {
+		query += ` AND h.project = ?`
+		args = append(args, project)
+	}
+	query += ` ORDER BY h.ip, op.port`
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list unenriched targets: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VersionTargetRow
+	for rows.Next() {
+		var r VersionTargetRow
+		if err := rows.Scan(&r.IP, &r.Hostname, &r.Port, &r.Protocol, &r.Project); err != nil {
+			return nil, fmt.Errorf("scan unenriched target row: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// MarkPhase2Done records that Phase 2 (service/version detection) has been
+// completed for the given host IP.
+func MarkPhase2Done(db *sql.DB, ip string) error {
+	_, err := db.Exec(
+		`UPDATE hosts SET phase2_done = 1, updated_at = CURRENT_TIMESTAMP WHERE ip = ?`, ip,
+	)
+	if err != nil {
+		return fmt.Errorf("mark phase2 done %s: %w", ip, err)
+	}
+	return nil
 }
 
 type hostFingerprint struct {
