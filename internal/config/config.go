@@ -43,8 +43,6 @@ var defaultInterestingPorts = []int{
 	21,    // FTP
 	22,    // SSH
 	23,    // Telnet
-	135,   // MS-RPC
-	139,   // NetBIOS
 	445,   // SMB
 	1433,  // MSSQL
 	1521,  // Oracle DB
@@ -186,8 +184,6 @@ interesting_ports:
   - 21      # FTP
   - 22      # SSH
   - 23      # Telnet
-  - 135     # MS-RPC
-  - 139     # NetBIOS
   - 445     # SMB
   - 1433    # MSSQL
   - 1521    # Oracle DB
