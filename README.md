@@ -22,7 +22,7 @@ make build          # output: bin/net-scan
 go build -o net-scan ./cmd/net-scan/
 ```
 
-> **Requires:** `nmap` and `sudo` on PATH. `proxychains` only needed when `--proxychains` is used.
+> **Requires:** `nmap` on PATH. `sudo` only needed when `--sudo` is used. `proxychains` only needed when `--proxychains` is used.
 
 ---
 
@@ -68,14 +68,14 @@ Available placeholders:
 | `{{PORTS}}`   | Comma-separated port list                | phase2, version     |
 | `{{RATE}}`    | Value of `--threads` / `--min-rate`      | phase1 (optional)   |
 
-> **Note:** The leading `nmap` token is stripped before execution — `sudo` (and `proxychains`
-> when `--proxychains` is set) are always prepended by the tool. Do not include them in the template.
+> **Note:** The leading `nmap` token is stripped before execution. Use `--sudo` to prepend `sudo`
+> (before `proxychains` when both are set). Do not include `sudo` or `proxychains` in the template.
 
 ## Commands
 
 ### `scan` — Run nmap against a target
 
-Two-phase pipeline under `sudo`:
+Two-phase pipeline:
 
 1. **Phase 1** — `nmap -p- -v --min-rate 5000` — discovers all open TCP ports  
    By default only `Discovered open port` lines are printed live. Use `-v` for full nmap output.  
@@ -118,6 +118,7 @@ net-scan scan -t 10.10.10.1 -d -v
 -t, --target        Target: IP, CIDR, comma-separated list, or file path (required)
     --project       Engagement label
     --ports-only    Skip -sV/-sC phase (Phase 1 only)
+    --sudo          Prepend sudo to nmap (and proxychains when combined)
     --proxychains   Route via proxychains; optional config path (default: /etc/proxychains.conf)
     --output-dir    Directory for raw nmap XML (default: ~/.pwnbox/scans/)
     --threads       nmap --min-rate (default: 5000)
@@ -142,6 +143,7 @@ net-scan scan version --output-dir /tmp/scans
 
 **Flags:**
 ```
+    --sudo         Prepend sudo to nmap (and proxychains when combined)
     --proxychains  Route via proxychains; optional config path (default: /etc/proxychains.conf)
     --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
 ```
@@ -161,8 +163,8 @@ net-scan scan enrich
 # Only enrich hosts from a specific project
 net-scan scan enrich --project corp-internal
 
-# Route through proxychains
-net-scan scan enrich --proxychains
+# Route through proxychains with sudo
+net-scan scan enrich --sudo --proxychains
 
 # Re-run Phase 2 on every host regardless of prior enrichment
 net-scan scan enrich --all
@@ -170,6 +172,7 @@ net-scan scan enrich --all
 
 **Flags:**
 ```
+    --sudo         Prepend sudo to nmap (and proxychains when combined)
     --proxychains  Route via proxychains; optional config path (default: /etc/proxychains.conf)
     --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
     --project      Only enrich hosts from this project

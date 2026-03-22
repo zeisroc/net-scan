@@ -20,6 +20,7 @@ var (
 	scanTarget       string
 	scanProject      string
 	scanPortsOnly    bool
+	scanSudo         bool
 	scanProxychains  string
 	scanOutputDir    string
 	scanThreads      int
@@ -81,16 +82,19 @@ func init() {
 	scanCmd.Flags().StringVarP(&scanTarget, "target", "t", "", "Target: IP, CIDR, comma-separated list, or file path (required)")
 	scanCmd.Flags().StringVar(&scanProject, "project", "", "Engagement label")
 	scanCmd.Flags().BoolVar(&scanPortsOnly, "ports-only", false, "Only run all-ports scan (skip -sV/-sC)")
+	scanCmd.Flags().BoolVar(&scanSudo, "sudo", false, "Prepend sudo to nmap (and proxychains) invocations")
 	scanCmd.Flags().StringVar(&scanProxychains, "proxychains", "", "Route via proxychains (optional config path; defaults to /etc/proxychains.conf)")
 	scanCmd.Flags().Lookup("proxychains").NoOptDefVal = defaultProxychainsConf
 	scanCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
 	scanCmd.Flags().IntVar(&scanThreads, "threads", 5000, "nmap --min-rate value")
 	_ = scanCmd.MarkFlagRequired("target")
 
+	scanVersionCmd.Flags().BoolVar(&scanSudo, "sudo", false, "Prepend sudo to nmap (and proxychains) invocations")
 	scanVersionCmd.Flags().StringVar(&scanProxychains, "proxychains", "", "Route via proxychains (optional config path; defaults to /etc/proxychains.conf)")
 	scanVersionCmd.Flags().Lookup("proxychains").NoOptDefVal = defaultProxychainsConf
 	scanVersionCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
 
+	scanEnrichCmd.Flags().BoolVar(&scanSudo, "sudo", false, "Prepend sudo to nmap (and proxychains) invocations")
 	scanEnrichCmd.Flags().StringVar(&scanProxychains, "proxychains", "", "Route via proxychains (optional config path; defaults to /etc/proxychains.conf)")
 	scanEnrichCmd.Flags().Lookup("proxychains").NoOptDefVal = defaultProxychainsConf
 	scanEnrichCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
@@ -104,13 +108,14 @@ func init() {
 
 func runScan(cmd *cobra.Command, args []string) error {
 	r := &runner.NmapRunner{
-		OutputDir:      scanOutputDir,
-		MinRate:        scanThreads,
+		OutputDir:       scanOutputDir,
+		MinRate:         scanThreads,
+		Sudo:            scanSudo,
 		ProxychainsConf: scanProxychains,
-		Debug:          debug,
-		Verbose:        verbose,
-		Phase1Template: gConfig.Scan.Phase1,
-		Phase2Template: gConfig.Scan.Phase2,
+		Debug:           debug,
+		Verbose:         verbose,
+		Phase1Template:  gConfig.Scan.Phase1,
+		Phase2Template:  gConfig.Scan.Phase2,
 	}
 
 	target := scanTarget
@@ -200,6 +205,7 @@ func runScanVersion(cmd *cobra.Command, args []string) error {
 
 	r := &runner.NmapRunner{
 		OutputDir:       scanOutputDir,
+		Sudo:            scanSudo,
 		ProxychainsConf: scanProxychains,
 		Debug:           debug,
 		Verbose:         verbose,
@@ -280,11 +286,12 @@ func runScanEnrich(cmd *cobra.Command, args []string) error {
 	}
 
 	r := &runner.NmapRunner{
-		OutputDir:      scanOutputDir,
+		OutputDir:       scanOutputDir,
+		Sudo:            scanSudo,
 		ProxychainsConf: scanProxychains,
-		Debug:          debug,
-		Verbose:        verbose,
-		Phase2Template: gConfig.Scan.Phase2,
+		Debug:           debug,
+		Verbose:         verbose,
+		Phase2Template:  gConfig.Scan.Phase2,
 	}
 
 	var enriched []models.Host

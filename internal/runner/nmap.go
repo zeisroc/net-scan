@@ -17,6 +17,7 @@ import (
 type NmapRunner struct {
 	OutputDir        string // directory to save XML files
 	MinRate          int
+	Sudo             bool   // prepend sudo to the nmap command
 	ProxychainsConf  string // path to proxychains config file; empty = no proxy
 	Debug            bool   // print the full nmap command before running
 	Verbose          bool   // print full nmap output; default prints only discovered-port lines
@@ -136,14 +137,21 @@ func (r *NmapRunner) RunVersionDetection(target string, tcpPorts, udpPorts []int
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }
 
-// buildArgs assembles the full command: [proxychains [-f conf]] sudo nmap <nmapArgs...>
-// When ProxychainsConf is set, proxychains is prepended; -f is used for non-default configs.
+// buildArgs assembles the full command using the configured options:
+//
+//	sudo=false, proxy=false → nmap <args>
+//	sudo=true,  proxy=false → sudo nmap <args>
+//	sudo=false, proxy=true  → proxychains [-f conf] nmap <args>
+//	sudo=true,  proxy=true  → sudo proxychains [-f conf] nmap <args>
 func (r *NmapRunner) buildArgs(nmapArgs []string) []string {
 	var args []string
+	if r.Sudo {
+		args = append(args, "sudo")
+	}
 	if r.ProxychainsConf != "" {
 		args = append(args, proxychainsPrefix(r.ProxychainsConf)...)
 	}
-	args = append(args, "sudo", "nmap")
+	args = append(args, "nmap")
 	args = append(args, nmapArgs...)
 	return args
 }

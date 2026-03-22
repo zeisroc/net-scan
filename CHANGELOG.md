@@ -7,8 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [2026-03-22] — continued
 
-### Changed
-- **`--proxy host:port` → `--proxychains [config_path]`** — proxy routing now uses
+### Added
+- **`--sudo` flag** on `scan`, `scan version`, and `scan enrich` — prepends `sudo`
+  to nmap invocations. When combined with `--proxychains` the order is
+  `sudo proxychains [-f conf] nmap`. Without `--sudo`, nmap runs directly with no
+  privilege escalation.
+
+** — proxy routing now uses
   proxychains directly instead of an ad-hoc SOCKS5 address.
   - `--proxychains` (no value) uses `/etc/proxychains.conf`
   - `--proxychains /custom/path.conf` passes `-f <path>` to proxychains
