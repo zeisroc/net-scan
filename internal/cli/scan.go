@@ -167,6 +167,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// For Windows hosts where smb-os-discovery did not fire, fall back to
+	// a direct nxc SMB probe to retrieve the computer name and domain.
+	probeSMBHostnames(hosts2, scanProxy)
+
 	printHostsSummary(hosts2)
 	return nil
 }
@@ -306,6 +310,25 @@ func runScanEnrich(cmd *cobra.Command, args []string) error {
 
 		if err := dbpkg.MarkPhase2Done(gDB, host.IP); err != nil {
 			fmt.Printf("[!] Could not mark phase2_done for %s: %v\n", host.IP, err)
+		}
+
+		// Probe SMB for hostname if 445 was open but smb-os-discovery did not fire.
+		// Build a synthetic host entry so probeSMBHostnames can check for 445 and
+		// an empty hostname using the same logic as in the main scan pipeline.
+		if host.Hostname == "" && containsInt(host.TCPPorts, 445) {
+			hostnameFromPhase2 := ""
+			for _, ph := range parsed {
+				if ph.Hostname != "" {
+					hostnameFromPhase2 = ph.Hostname
+					break
+				}
+			}
+			if hostnameFromPhase2 == "" {
+				probeSMBHostnames([]models.Host{{
+					IP:    host.IP,
+					Ports: []models.OpenPort{{Port: 445, Protocol: "tcp"}},
+				}}, scanProxy)
+			}
 		}
 
 		enriched = append(enriched, parsed...)
@@ -523,4 +546,61 @@ func intSliceToStrings(ints []int) []string {
 		out[i] = strconv.Itoa(v)
 	}
 	return out
+}
+
+// probeSMBHostnames probes hosts that have port 445/tcp open but no hostname
+// using nxc (netexec) SMB negotiation — reliable for Windows AD machines even
+// when nmap's smb-os-discovery script fails. Updates the DB on success.
+// Silently skips if nxc is not installed.
+func probeSMBHostnames(hosts []models.Host, proxy string) {
+	for _, h := range hosts {
+		if h.Hostname != "" {
+			continue
+		}
+		if !hasTCPPort(h, 445) {
+			continue
+		}
+
+		fmt.Printf("[*] SMB probe — %s\n", h.IP)
+		info, err := runner.RunNxcSMB(h.IP, proxy)
+		if err != nil {
+			fmt.Printf("[!] SMB probe error for %s: %v\n", h.IP, err)
+			continue
+		}
+		if info == nil {
+			continue // nxc not installed or no SMB banner
+		}
+
+		fmt.Printf("    ✓ %s · %s · %s\n", info.Name, info.Domain, info.OS)
+
+		_, err = dbpkg.UpsertHost(gDB, models.Host{
+			IP:       h.IP,
+			Hostname: info.Name,
+			OSGuess:  info.OS,
+			Source:   "nxc",
+		})
+		if err != nil {
+			fmt.Printf("[!] Could not save SMB info for %s: %v\n", h.IP, err)
+		}
+	}
+}
+
+// hasTCPPort reports whether a host has the given port open over TCP.
+func hasTCPPort(h models.Host, port int) bool {
+	for _, p := range h.Ports {
+		if p.Port == port && strings.ToLower(p.Protocol) == "tcp" {
+			return true
+		}
+	}
+	return false
+}
+
+// containsInt reports whether val is present in the slice.
+func containsInt(slice []int, val int) bool {
+	for _, v := range slice {
+		if v == val {
+			return true
+		}
+	}
+	return false
 }
