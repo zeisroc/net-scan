@@ -576,6 +576,7 @@ func probeSMBHostnames(hosts []models.Host, proxy string) {
 		_, err = dbpkg.UpsertHost(gDB, models.Host{
 			IP:       h.IP,
 			Hostname: info.Name,
+			Domain:   info.Domain,
 			OSGuess:  info.OS,
 			Source:   "nxc",
 		})

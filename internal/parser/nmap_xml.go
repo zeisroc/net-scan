@@ -149,6 +149,9 @@ func ParseNmapXML(r io.Reader, source string) ([]models.Host, error) {
 			} else if fqdn := elems["fqdn"]; fqdn != "" && host.Hostname == "" {
 				host.Hostname = fqdn
 			}
+			if domain := elems["domain"]; domain != "" {
+				host.Domain = domain
+			}
 			// Use SMB OS string when nmap's -O detection produced nothing.
 			if host.OSGuess == "" {
 				if osStr := elems["os"]; osStr != "" {
