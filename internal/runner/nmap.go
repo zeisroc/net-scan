@@ -258,9 +258,9 @@ func expandTemplate(tmpl, target, ports, xmlPath string, rate int) ([]string, er
 // /etc/proxychains4.conf) the -f flag is omitted; otherwise -f <path> is used.
 func proxychainsPrefix(conf string) []string {
 	if conf == "/etc/proxychains.conf" || conf == "/etc/proxychains4.conf" {
-		return []string{"proxychains"}
+		return []string{"proxychains", "-q"}
 	}
-	return []string{"proxychains", "-f", conf}
+	return []string{"proxychains", "-q", "-f", conf}
 }
 
 // containsFlag reports whether flag is present in the args slice.
