@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
-	"text/tabwriter"
+	"unicode/utf8"
 
 	dbpkg "github.com/pwnbox/net_scan/internal/db"
 	"github.com/spf13/cobra"
@@ -64,78 +65,213 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// ── ANSI constants ────────────────────────────────────────────────────────────
+
 const (
-	ansiRed   = "\033[31m"
-	ansiReset = "\033[0m"
+	ansiReset  = "\033[0m"
+	ansiBold   = "\033[1m"
+	ansiDim    = "\033[2m"
+	ansiRed    = "\033[31m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiCyan   = "\033[36m"
 )
 
-func printHostsTable(hosts []dbpkg.HostRow) {
-	fmt.Printf("\n\033[1m─── Results ────────────────────────────────────────────────\033[0m\n")
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "IP\tHOSTNAME\tPWND\tTAG\tPORTS")
-	fmt.Fprintln(w, "──\t────────\t────\t───\t─────")
-	for _, h := range hosts {
-		hostname := dash(h.Hostname)
+// padRight pads plain (no ANSI) text to the given visible width.
+// Uses rune count so multi-byte UTF-8 characters (e.g. "—", "✓") align correctly.
+// Always call this on the raw string BEFORE wrapping in color codes.
+func padRight(s string, width int) string {
+	n := utf8.RuneCountInString(s)
+	if n >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-n)
+}
+
+// runeLen returns the visible rune count of a plain string.
+func runeLen(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+// ── Terminal table ────────────────────────────────────────────────────────────
+
+// listRow holds pre-formatted, plain (ANSI-free) display values for one host.
+type listRow struct {
+	ip      string
+	host    string
+	pwnd    string
+	tag     string
+	ports   string
+	isPwned bool
+}
+
+func buildListRows(hosts []dbpkg.HostRow) []listRow {
+	rows := make([]listRow, len(hosts))
+	for i, h := range hosts {
+		hostname := h.Hostname
+		if hostname == "" {
+			hostname = "—"
+		}
+		tag := h.Tag
+		if tag == "" {
+			tag = "UNKNOW"
+		}
 		pwnd := "-"
 		if h.Pwned {
-			hostname = ansiRed + hostname + ansiReset
 			pwnd = "✓"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			h.IP, hostname, pwnd, dash(h.Tag), formatPorts(h.Ports))
+		rows[i] = listRow{
+			ip:      h.IP,
+			host:    hostname,
+			pwnd:    pwnd,
+			tag:     tag,
+			ports:   formatPortsCompact(h.Ports),
+			isPwned: h.Pwned,
+		}
 	}
-	w.Flush()
+	return rows
+}
+
+// formatPortsCompact builds a compact port list: "80(http)  443(https)  22(ssh)"
+// Returns a dim "not scanned" label for hosts with no ports yet.
+func formatPortsCompact(ports []dbpkg.PortInfo) string {
+	if len(ports) == 0 {
+		return "not scanned"
+	}
+	parts := make([]string, 0, len(ports))
+	for _, p := range ports {
+		entry := strconv.Itoa(p.Port)
+		if p.Service != "" {
+			entry += "(" + p.Service + ")"
+		}
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, "  ")
+}
+
+func printHostsTable(hosts []dbpkg.HostRow) {
+	totalPorts := 0
+	for _, h := range hosts {
+		totalPorts += len(h.Ports)
+	}
+
+	rows := buildListRows(hosts)
+
+	// ── Column widths: computed from visible (rune-count) strings ────────────
+	// Minimum widths match the header labels.
+	wIP, wHost, wPwnd, wTag, wPorts := runeLen("IP"), runeLen("HOSTNAME"), runeLen("PWND"), runeLen("TAGS"), runeLen("PORTS")
+	for _, r := range rows {
+		if runeLen(r.ip) > wIP {
+			wIP = runeLen(r.ip)
+		}
+		if runeLen(r.host) > wHost {
+			wHost = runeLen(r.host)
+		}
+		if runeLen(r.tag) > wTag {
+			wTag = runeLen(r.tag)
+		}
+		if runeLen(r.ports) > wPorts {
+			wPorts = runeLen(r.ports)
+		}
+	}
+	_ = wPorts // last column: no right-padding needed
+	_ = wPwnd  // fixed at header width
+
+	// ── Summary ───────────────────────────────────────────────────────────────
+	fmt.Printf("\n  %s%d host(s)  ·  %d open port(s)%s\n\n",
+		ansiDim, len(hosts), totalPorts, ansiReset)
+
+	// ── Header ────────────────────────────────────────────────────────────────
+	fmt.Printf("  %s  %s  %s  %s  %s\n",
+		ansiBold+padRight("IP", wIP)+ansiReset,
+		ansiBold+padRight("HOSTNAME", wHost)+ansiReset,
+		ansiBold+padRight("PWND", wPwnd)+ansiReset,
+		ansiBold+padRight("TAGS", wTag)+ansiReset,
+		ansiBold+"PORTS"+ansiReset,
+	)
+
+	// ── Separator ─────────────────────────────────────────────────────────────
+	fmt.Printf("  %s%s  %s  %s  %s  %s%s\n",
+		ansiDim,
+		strings.Repeat("─", wIP),
+		strings.Repeat("─", wHost),
+		strings.Repeat("─", wPwnd),
+		strings.Repeat("─", wTag),
+		strings.Repeat("─", wPorts),
+		ansiReset,
+	)
+
+	// ── Rows ──────────────────────────────────────────────────────────────────
+	for _, r := range rows {
+		// IP: always bold cyan
+		ipStr := ansiBold + ansiCyan + padRight(r.ip, wIP) + ansiReset
+
+		// Hostname: bold red + pwned marker, or plain
+		var hostStr string
+		if r.isPwned {
+			hostStr = ansiBold + ansiRed + padRight(r.host, wHost) + ansiReset
+		} else {
+			hostStr = padRight(r.host, wHost)
+		}
+
+		// PWND: bold red checkmark or dim dash
+		var pwndStr string
+		if r.isPwned {
+			pwndStr = ansiBold + ansiRed + padRight(r.pwnd, wPwnd) + ansiReset
+		} else {
+			pwndStr = ansiDim + padRight(r.pwnd, wPwnd) + ansiReset
+		}
+
+		// Tags: yellow, or dim for UNKNOW
+		var tagStr string
+		if r.tag == "UNKNOW" {
+			tagStr = ansiDim + padRight(r.tag, wTag) + ansiReset
+		} else {
+			tagStr = ansiYellow + padRight(r.tag, wTag) + ansiReset
+		}
+
+		// Ports: green, or dim for unscanned hosts (last column, no right-padding)
+		var portsStr string
+		if r.ports == "not scanned" {
+			portsStr = ansiDim + r.ports + ansiReset
+		} else {
+			portsStr = ansiGreen + r.ports + ansiReset
+		}
+
+		fmt.Printf("  %s  %s  %s  %s  %s\n",
+			ipStr, hostStr, pwndStr, tagStr, portsStr)
+	}
+
 	fmt.Println()
 }
 
+// ── Markdown ──────────────────────────────────────────────────────────────────
+
 func printHostsMarkdown(hosts []dbpkg.HostRow) {
-	fmt.Println("| IP | HOSTNAME | PWND | TAG | PORTS |")
+	fmt.Println("| IP | HOSTNAME | PWND | TAGS | PORTS |")
 	fmt.Println("|---|---|---|---|---|")
 	for _, h := range hosts {
+		hostname := h.Hostname
+		if hostname == "" {
+			hostname = "—"
+		}
 		pwnd := "✗"
 		if h.Pwned {
 			pwnd = "✓"
 		}
+		tag := h.Tag
+		if tag == "" {
+			tag = "UNKNOW"
+		}
 		fmt.Printf("| %s | %s | %s | %s | %s |\n",
-			h.IP, dash(h.Hostname), pwnd, dash(h.Tag), formatPortsMD(h.Ports))
+			h.IP, hostname, pwnd, tag, formatPortsCompact(h.Ports))
 	}
 }
+
+// ── JSON ──────────────────────────────────────────────────────────────────────
 
 func printHostsJSON(hosts []dbpkg.HostRow) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(hosts)
-}
-
-// formatPorts renders port list as a compact inline string for terminal output.
-// Example: 80/tcp(http)  │  443/tcp(https)  │  3389/tcp(rdp)
-func formatPorts(ports []dbpkg.PortInfo) string {
-	if len(ports) == 0 {
-		return "-"
-	}
-	parts := make([]string, 0, len(ports))
-	for _, p := range ports {
-		entry := fmt.Sprintf("%d/%s", p.Port, p.Protocol)
-		if p.Service != "" {
-			entry += "(" + p.Service + ")"
-		}
-		parts = append(parts, entry)
-	}
-	return strings.Join(parts, "  │  ")
-}
-
-// formatPortsMD renders ports for markdown (no pipes to avoid table breakage).
-func formatPortsMD(ports []dbpkg.PortInfo) string {
-	if len(ports) == 0 {
-		return "-"
-	}
-	parts := make([]string, 0, len(ports))
-	for _, p := range ports {
-		entry := fmt.Sprintf("%d/%s", p.Port, p.Protocol)
-		if p.Service != "" {
-			entry += "(" + p.Service + ")"
-		}
-		parts = append(parts, entry)
-	}
-	return strings.Join(parts, ", ")
 }
