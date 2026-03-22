@@ -34,17 +34,40 @@ type ScanTemplates struct {
 
 // Config is the top-level configuration structure.
 type Config struct {
-	Scan ScanTemplates `yaml:"scan"`
+	Scan             ScanTemplates `yaml:"scan"`
+	InterestingPorts []int         `yaml:"interesting_ports"`
+}
+
+// defaultInterestingPorts is the built-in list of management / high-value ports.
+var defaultInterestingPorts = []int{
+	21,    // FTP
+	22,    // SSH
+	23,    // Telnet
+	135,   // MS-RPC
+	139,   // NetBIOS
+	445,   // SMB
+	1433,  // MSSQL
+	1521,  // Oracle DB
+	3306,  // MySQL / MariaDB
+	3389,  // RDP
+	5432,  // PostgreSQL
+	5985,  // WinRM (HTTP)
+	5986,  // WinRM (HTTPS)
+	6379,  // Redis
+	27017, // MongoDB
 }
 
 // Defaults returns a Config pre-filled with the built-in nmap templates.
 func Defaults() *Config {
+	ports := make([]int, len(defaultInterestingPorts))
+	copy(ports, defaultInterestingPorts)
 	return &Config{
 		Scan: ScanTemplates{
 			Phase1:  DefaultPhase1,
 			Phase2:  DefaultPhase2,
 			Version: DefaultVersion,
 		},
+		InterestingPorts: ports,
 	}
 }
 
@@ -129,8 +152,10 @@ func expandPath(path string) (string, error) {
 }
 
 // defaultConfigYAML is the annotated template written to disk on first run.
-const defaultConfigYAML = `# net-scan — nmap command templates
+const defaultConfigYAML = `# net-scan — configuration
 # Location: ~/.pwnbox/net-scan.yaml
+
+# ── nmap command templates ────────────────────────────────────────────────────
 #
 # Edit these templates to customise the exact nmap flags used in each phase.
 #
@@ -143,7 +168,7 @@ const defaultConfigYAML = `# net-scan — nmap command templates
 #
 # Notes:
 #   • Leading "nmap" is optional — it is stripped and re-added with sudo.
-#   • When --proxychains is set, "proxychains [-f config]" is prepended
+#   • When --proxychains is set, "proxychains -q [-f config]" is prepended
 #     automatically and -sT is injected if not already present in the template.
 #   • -oX {{OUTPUT}} must be kept in every template or results cannot be parsed.
 
@@ -151,4 +176,26 @@ scan:
   phase1:  "nmap -p- -v --min-rate={{RATE}} -oX {{OUTPUT}} {{TARGET}}"
   phase2:  "nmap -p {{PORTS}} -sV -sC -oX {{OUTPUT}} {{TARGET}}"
   version: "nmap -sV -p {{PORTS}} -oX {{OUTPUT}} {{TARGET}}"
+
+# ── Interesting ports ─────────────────────────────────────────────────────────
+#
+# Ports in this list are highlighted in red in "net-scan list" output.
+# Add or remove entries to match your engagement scope.
+
+interesting_ports:
+  - 21      # FTP
+  - 22      # SSH
+  - 23      # Telnet
+  - 135     # MS-RPC
+  - 139     # NetBIOS
+  - 445     # SMB
+  - 1433    # MSSQL
+  - 1521    # Oracle DB
+  - 3306    # MySQL / MariaDB
+  - 3389    # RDP
+  - 5432    # PostgreSQL
+  - 5985    # WinRM (HTTP)
+  - 5986    # WinRM (HTTPS)
+  - 6379    # Redis
+  - 27017   # MongoDB
 `

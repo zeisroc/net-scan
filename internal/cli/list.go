@@ -143,6 +143,7 @@ func buildListRows(hosts []dbpkg.HostRow) []listRow {
 
 // formatPortsCompact builds a compact port list: "80(http)  443(https)  22(ssh)"
 // Returns a dim "not scanned" label for hosts with no ports yet.
+// This is the plain (ANSI-free) version used for markdown and JSON output.
 func formatPortsCompact(ports []dbpkg.PortInfo) string {
 	if len(ports) == 0 {
 		return "not scanned"
@@ -158,10 +159,39 @@ func formatPortsCompact(ports []dbpkg.PortInfo) string {
 	return strings.Join(parts, "  ")
 }
 
+// formatPortsHighlighted returns an ANSI-colored port list where ports in the
+// interesting set are bold red and all others are green.
+func formatPortsHighlighted(ports []dbpkg.PortInfo, interesting map[int]bool) string {
+	if len(ports) == 0 {
+		return ansiDim + "not scanned" + ansiReset
+	}
+	parts := make([]string, 0, len(ports))
+	for _, p := range ports {
+		entry := strconv.Itoa(p.Port)
+		if p.Service != "" {
+			entry += "(" + p.Service + ")"
+		}
+		if interesting[p.Port] {
+			parts = append(parts, ansiBold+ansiRed+entry+ansiReset)
+		} else {
+			parts = append(parts, ansiGreen+entry+ansiReset)
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
 func printHostsTable(hosts []dbpkg.HostRow) {
 	totalPorts := 0
 	for _, h := range hosts {
 		totalPorts += len(h.Ports)
+	}
+
+	// Build interesting-port set from config (nil-safe).
+	interesting := make(map[int]bool)
+	if gConfig != nil {
+		for _, p := range gConfig.InterestingPorts {
+			interesting[p] = true
+		}
 	}
 
 	rows := buildListRows(hosts)
@@ -216,7 +246,7 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 	)
 
 	// ── Rows ──────────────────────────────────────────────────────────────────
-	for _, r := range rows {
+	for i, r := range rows {
 		// IP: always bold cyan
 		ipStr := ansiBold + ansiCyan + padRight(r.ip, wIP) + ansiReset
 
@@ -252,13 +282,8 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 			tagStr = ansiYellow + padRight(r.tag, wTag) + ansiReset
 		}
 
-		// Ports: green, or dim for unscanned hosts (last column, no right-padding)
-		var portsStr string
-		if r.ports == "not scanned" {
-			portsStr = ansiDim + r.ports + ansiReset
-		} else {
-			portsStr = ansiGreen + r.ports + ansiReset
-		}
+		// Ports: interesting ports bold red, others green, unscanned dim
+		portsStr := formatPortsHighlighted(hosts[i].Ports, interesting)
 
 		fmt.Printf("  %s  %s  %s  %s  %s  %s\n",
 			ipStr, hostStr, domainStr, pwndStr, tagStr, portsStr)
