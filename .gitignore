@@ -35,6 +35,9 @@ go.work.sum
 # Personal context / notes
 CONTEXT.md
 
+# GitHub internal files (copilot instructions, guidelines)
+.github/
+
 # OS
 .DS_Store
 Thumbs.db
