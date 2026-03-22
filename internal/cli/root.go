@@ -7,14 +7,17 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	cfgpkg "github.com/pwnbox/net_scan/internal/config"
 	dbpkg "github.com/pwnbox/net_scan/internal/db"
 )
 
 var (
-	dbPath  string
-	debug   bool
-	verbose bool
-	gDB     *sql.DB
+	dbPath     string
+	configPath string
+	debug      bool
+	verbose    bool
+	gDB        *sql.DB
+	gConfig    *cfgpkg.Config
 )
 
 var rootCmd = &cobra.Command{
@@ -29,7 +32,9 @@ data for credops and nxc.`,
 func init() {
 	home, _ := os.UserHomeDir()
 	defaultDB := filepath.Join(home, ".pwnbox", "network.db")
+	defaultCfg := filepath.Join(home, ".pwnbox", "net-scan.yaml")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDB, "SQLite DB path")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", defaultCfg, "Config file path (default: ~/.pwnbox/net-scan.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Print nmap commands before executing")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Print full nmap output (default: discovered ports only)")
 }
@@ -39,6 +44,10 @@ func openDB(cmd *cobra.Command, args []string) error {
 	gDB, err = dbpkg.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
+	}
+	gConfig, err = cfgpkg.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
 	}
 	return nil
 }

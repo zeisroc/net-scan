@@ -99,11 +99,13 @@ func init() {
 
 func runScan(cmd *cobra.Command, args []string) error {
 	r := &runner.NmapRunner{
-		OutputDir: scanOutputDir,
-		MinRate:   scanThreads,
-		Proxy:     scanProxy,
-		Debug:     debug,
-		Verbose:   verbose,
+		OutputDir:      scanOutputDir,
+		MinRate:        scanThreads,
+		Proxy:          scanProxy,
+		Debug:          debug,
+		Verbose:        verbose,
+		Phase1Template: gConfig.Scan.Phase1,
+		Phase2Template: gConfig.Scan.Phase2,
 	}
 
 	target := scanTarget
@@ -192,10 +194,11 @@ func runScanVersion(cmd *cobra.Command, args []string) error {
 	}
 
 	r := &runner.NmapRunner{
-		OutputDir: scanOutputDir,
-		Proxy:     scanProxy,
-		Debug:     debug,
-		Verbose:   verbose,
+		OutputDir:       scanOutputDir,
+		Proxy:           scanProxy,
+		Debug:           debug,
+		Verbose:         verbose,
+		VersionTemplate: gConfig.Scan.Version,
 	}
 
 	var refreshed []models.Host
@@ -272,10 +275,11 @@ func runScanEnrich(cmd *cobra.Command, args []string) error {
 	}
 
 	r := &runner.NmapRunner{
-		OutputDir: scanOutputDir,
-		Proxy:     scanProxy,
-		Debug:     debug,
-		Verbose:   verbose,
+		OutputDir:      scanOutputDir,
+		Proxy:          scanProxy,
+		Debug:          debug,
+		Verbose:        verbose,
+		Phase2Template: gConfig.Scan.Phase2,
 	}
 
 	var enriched []models.Host
