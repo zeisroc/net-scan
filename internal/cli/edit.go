@@ -13,6 +13,7 @@ var (
 	editPort       int
 	editProtocol   string
 	editHostname   string
+	editDomain     string
 	editTag        string
 	editOSGuess    string
 	editProject    string
@@ -43,6 +44,7 @@ func init() {
 	editCmd.Flags().StringVar(&editProtocol, "protocol", "tcp", "Protocol for port-level edits")
 
 	editCmd.Flags().StringVar(&editHostname, "hostname", "", "Set or clear hostname")
+	editCmd.Flags().StringVar(&editDomain, "domain", "", "Set or clear AD domain")
 	editCmd.Flags().StringVar(&editTag, "tag", "", "Set or clear a manual host tag (comma-separated allowed)")
 	editCmd.Flags().StringVar(&editOSGuess, "os-guess", "", "Set or clear OS guess")
 	editCmd.Flags().StringVar(&editProject, "project", "", "Set or clear project")
@@ -63,6 +65,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	portUpdate := dbpkg.PortUpdate{}
 
 	setStringUpdate(cmd, "hostname", editHostname, &hostUpdate.Hostname)
+	setStringUpdate(cmd, "domain", editDomain, &hostUpdate.Domain)
 	setStringUpdate(cmd, "tag", editTag, &hostUpdate.ManualTag)
 	setStringUpdate(cmd, "os-guess", editOSGuess, &hostUpdate.OSGuess)
 	setStringUpdate(cmd, "project", editProject, &hostUpdate.Project)
