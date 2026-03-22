@@ -15,11 +15,14 @@ import (
 
 // NmapRunner holds configuration for executing nmap.
 type NmapRunner struct {
-	OutputDir string // directory to save XML files
-	MinRate   int
-	Proxy     string // SOCKS5 host:port via proxychains; empty = no proxy
-	Debug     bool   // print the full nmap command before running
-	Verbose   bool   // print full nmap output; default prints only discovered-port lines
+	OutputDir       string // directory to save XML files
+	MinRate         int
+	Proxy           string // SOCKS5 host:port via proxychains; empty = no proxy
+	Debug           bool   // print the full nmap command before running
+	Verbose         bool   // print full nmap output; default prints only discovered-port lines
+	Phase1Template  string // nmap command template for all-ports discovery
+	Phase2Template  string // nmap command template for service/version detection
+	VersionTemplate string // nmap command template for DB-driven version scan
 }
 
 // targetArgs parses the raw --target value and returns the nmap target arguments.
@@ -59,7 +62,7 @@ func targetArgs(raw string) ([]string, string, error) {
 	return []string{raw}, label, nil
 }
 
-// RunAllPorts runs phase 1: nmap -p- to discover all open ports.
+// RunAllPorts runs phase 1: discover all open ports using the Phase1Template.
 //
 // Output behaviour:
 //   - default:  only "Discovered open port" lines are printed
@@ -72,19 +75,18 @@ func (r *NmapRunner) RunAllPorts(target string) (string, error) {
 		return "", err
 	}
 	xmlPath := r.xmlPathFromLabel(label, "phase1")
-	// -v makes nmap emit "Discovered open port" lines as it scans.
-	// -sT (TCP connect) is required when routing through proxychains; SYN scans use raw
-	// sockets that bypass the SOCKS stack and produce no results through a proxy.
-	nmapArgs := []string{"-p-", "-v", fmt.Sprintf("--min-rate=%d", r.MinRate)}
-	if r.Proxy != "" {
-		nmapArgs = append(nmapArgs, "-sT")
+
+	nmapArgs, err := expandTemplate(r.Phase1Template, strings.Join(tArgs, " "), "", xmlPath, r.MinRate)
+	if err != nil {
+		return "", fmt.Errorf("expand phase1 template: %w", err)
 	}
-	nmapArgs = append(nmapArgs, "-oX", xmlPath)
-	nmapArgs = append(nmapArgs, tArgs...)
+	if r.Proxy != "" && !containsFlag(nmapArgs, "-sT") {
+		nmapArgs = append([]string{"-sT"}, nmapArgs...)
+	}
 	return xmlPath, r.run(r.buildArgs(nmapArgs), true)
 }
 
-// RunServiceDetection runs phase 2: nmap -sV -sC on specific ports.
+// RunServiceDetection runs phase 2: service/version detection using the Phase2Template.
 //
 // Output behaviour:
 //   - default:  silent
@@ -97,16 +99,18 @@ func (r *NmapRunner) RunServiceDetection(target, ports string) (string, error) {
 		return "", err
 	}
 	xmlPath := r.xmlPathFromLabel(label, "phase2")
-	nmapArgs := []string{"-p", ports, "-sV", "-sC"}
-	if r.Proxy != "" {
-		nmapArgs = append(nmapArgs, "-sT")
+
+	nmapArgs, err := expandTemplate(r.Phase2Template, strings.Join(tArgs, " "), ports, xmlPath, r.MinRate)
+	if err != nil {
+		return "", fmt.Errorf("expand phase2 template: %w", err)
 	}
-	nmapArgs = append(nmapArgs, "-oX", xmlPath)
-	nmapArgs = append(nmapArgs, tArgs...)
+	if r.Proxy != "" && !containsFlag(nmapArgs, "-sT") {
+		nmapArgs = append([]string{"-sT"}, nmapArgs...)
+	}
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }
 
-// RunVersionDetection runs nmap -sV against a single stored host and its known ports.
+// RunVersionDetection runs a DB-driven version scan using the VersionTemplate.
 func (r *NmapRunner) RunVersionDetection(target string, tcpPorts, udpPorts []int) (string, error) {
 	tArgs, label, err := targetArgs(target)
 	if err != nil {
@@ -119,12 +123,16 @@ func (r *NmapRunner) RunVersionDetection(target string, tcpPorts, udpPorts []int
 	}
 
 	xmlPath := r.xmlPathFromLabel(label, "version")
-	nmapArgs := append(extraArgs, "-sV", "-p", portArg)
-	if r.Proxy != "" {
-		nmapArgs = append(nmapArgs, "-sT")
+
+	nmapArgs, err := expandTemplate(r.VersionTemplate, strings.Join(tArgs, " "), portArg, xmlPath, r.MinRate)
+	if err != nil {
+		return "", fmt.Errorf("expand version template: %w", err)
 	}
-	nmapArgs = append(nmapArgs, "-oX", xmlPath)
-	nmapArgs = append(nmapArgs, tArgs...)
+	// Prepend any extra args from buildVersionScanArgs (e.g. -sU for UDP).
+	nmapArgs = append(extraArgs, nmapArgs...)
+	if r.Proxy != "" && !containsFlag(nmapArgs, "-sT") {
+		nmapArgs = append([]string{"-sT"}, nmapArgs...)
+	}
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }
 
@@ -213,6 +221,48 @@ func (r *NmapRunner) xmlPathFromLabel(label, phase string) string {
 	ts := time.Now().Format("20060102_150405")
 	return filepath.Join(r.OutputDir, fmt.Sprintf("%s_%s_%s.xml", ts, label, phase))
 }
+
+// expandTemplate substitutes all placeholders in tmpl and returns the resulting
+// nmap argument slice (leading "nmap" token is stripped — buildArgs re-adds it
+// with sudo). target, ports, xmlPath and rate map to {{TARGET}}, {{PORTS}},
+// {{OUTPUT}}, and {{RATE}} respectively.
+func expandTemplate(tmpl, target, ports, xmlPath string, rate int) ([]string, error) {
+	s := strings.ReplaceAll(tmpl, PlaceholderTarget, target)
+	s = strings.ReplaceAll(s, PlaceholderPorts, ports)
+	s = strings.ReplaceAll(s, PlaceholderOutput, xmlPath)
+	s = strings.ReplaceAll(s, PlaceholderRate, strconv.Itoa(rate))
+
+	args := strings.Fields(s)
+	// Strip a leading "nmap" or absolute path ending in "nmap" — buildArgs
+	// re-adds the binary name together with sudo (and proxychains when needed).
+	if len(args) > 0 && (args[0] == "nmap" || strings.HasSuffix(args[0], "/nmap")) {
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return nil, fmt.Errorf("template expanded to an empty argument list")
+	}
+	return args, nil
+}
+
+// containsFlag reports whether flag is present in the args slice.
+func containsFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// Placeholder constants mirrored from the config package to avoid an import
+// cycle (runner → config is fine; this keeps the strings in one place via
+// the config package but runner needs them for expansion).
+const (
+	PlaceholderTarget = "{{TARGET}}"
+	PlaceholderOutput = "{{OUTPUT}}"
+	PlaceholderPorts  = "{{PORTS}}"
+	PlaceholderRate   = "{{RATE}}"
+)
 
 func buildVersionScanArgs(tcpPorts, udpPorts []int) (string, []string) {
 	tcp := sortedUniquePorts(tcpPorts)
