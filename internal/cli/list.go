@@ -99,6 +99,7 @@ func runeLen(s string) int {
 type listRow struct {
 	ip      string
 	host    string
+	domain  string
 	pwnd    string
 	tag     string
 	ports   string
@@ -112,9 +113,13 @@ func buildListRows(hosts []dbpkg.HostRow) []listRow {
 		if hostname == "" {
 			hostname = "—"
 		}
+		domain := h.Domain
+		if domain == "" {
+			domain = "—"
+		}
 		tag := h.Tag
 		if tag == "" {
-			tag = "UNKNOW"
+			tag = "UNKNOWN"
 		}
 		pwnd := "-"
 		if h.Pwned {
@@ -123,6 +128,7 @@ func buildListRows(hosts []dbpkg.HostRow) []listRow {
 		rows[i] = listRow{
 			ip:      h.IP,
 			host:    hostname,
+			domain:  domain,
 			pwnd:    pwnd,
 			tag:     tag,
 			ports:   formatPortsCompact(h.Ports),
@@ -158,14 +164,17 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 	rows := buildListRows(hosts)
 
 	// ── Column widths: computed from visible (rune-count) strings ────────────
-	// Minimum widths match the header labels.
-	wIP, wHost, wPwnd, wTag, wPorts := runeLen("IP"), runeLen("HOSTNAME"), runeLen("PWND"), runeLen("TAGS"), runeLen("PORTS")
+	wIP, wHost, wDomain, wPwnd, wTag, wPorts :=
+		runeLen("IP"), runeLen("HOSTNAME"), runeLen("DOMAIN"), runeLen("PWND"), runeLen("TAGS"), runeLen("PORTS")
 	for _, r := range rows {
 		if runeLen(r.ip) > wIP {
 			wIP = runeLen(r.ip)
 		}
 		if runeLen(r.host) > wHost {
 			wHost = runeLen(r.host)
+		}
+		if runeLen(r.domain) > wDomain {
+			wDomain = runeLen(r.domain)
 		}
 		if runeLen(r.tag) > wTag {
 			wTag = runeLen(r.tag)
@@ -182,19 +191,21 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 		ansiDim, len(hosts), totalPorts, ansiReset)
 
 	// ── Header ────────────────────────────────────────────────────────────────
-	fmt.Printf("  %s  %s  %s  %s  %s\n",
+	fmt.Printf("  %s  %s  %s  %s  %s  %s\n",
 		ansiBold+padRight("IP", wIP)+ansiReset,
 		ansiBold+padRight("HOSTNAME", wHost)+ansiReset,
+		ansiBold+padRight("DOMAIN", wDomain)+ansiReset,
 		ansiBold+padRight("PWND", wPwnd)+ansiReset,
 		ansiBold+padRight("TAGS", wTag)+ansiReset,
 		ansiBold+"PORTS"+ansiReset,
 	)
 
 	// ── Separator ─────────────────────────────────────────────────────────────
-	fmt.Printf("  %s%s  %s  %s  %s  %s%s\n",
+	fmt.Printf("  %s%s  %s  %s  %s  %s  %s%s\n",
 		ansiDim,
 		strings.Repeat("─", wIP),
 		strings.Repeat("─", wHost),
+		strings.Repeat("─", wDomain),
 		strings.Repeat("─", wPwnd),
 		strings.Repeat("─", wTag),
 		strings.Repeat("─", wPorts),
@@ -214,6 +225,14 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 			hostStr = padRight(r.host, wHost)
 		}
 
+		// Domain: dim if unknown
+		var domainStr string
+		if r.domain == "—" {
+			domainStr = ansiDim + padRight(r.domain, wDomain) + ansiReset
+		} else {
+			domainStr = padRight(r.domain, wDomain)
+		}
+
 		// PWND: bold red checkmark or dim dash
 		var pwndStr string
 		if r.isPwned {
@@ -222,9 +241,9 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 			pwndStr = ansiDim + padRight(r.pwnd, wPwnd) + ansiReset
 		}
 
-		// Tags: yellow, or dim for UNKNOW
+		// Tags: yellow, or dim for UNKNOWN
 		var tagStr string
-		if r.tag == "UNKNOW" {
+		if r.tag == "UNKNOWN" {
 			tagStr = ansiDim + padRight(r.tag, wTag) + ansiReset
 		} else {
 			tagStr = ansiYellow + padRight(r.tag, wTag) + ansiReset
@@ -238,8 +257,8 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 			portsStr = ansiGreen + r.ports + ansiReset
 		}
 
-		fmt.Printf("  %s  %s  %s  %s  %s\n",
-			ipStr, hostStr, pwndStr, tagStr, portsStr)
+		fmt.Printf("  %s  %s  %s  %s  %s  %s\n",
+			ipStr, hostStr, domainStr, pwndStr, tagStr, portsStr)
 	}
 
 	fmt.Println()
@@ -248,12 +267,16 @@ func printHostsTable(hosts []dbpkg.HostRow) {
 // ── Markdown ──────────────────────────────────────────────────────────────────
 
 func printHostsMarkdown(hosts []dbpkg.HostRow) {
-	fmt.Println("| IP | HOSTNAME | PWND | TAGS | PORTS |")
-	fmt.Println("|---|---|---|---|---|")
+	fmt.Println("| IP | HOSTNAME | DOMAIN | PWND | TAGS | PORTS |")
+	fmt.Println("|---|---|---|---|---|---|")
 	for _, h := range hosts {
 		hostname := h.Hostname
 		if hostname == "" {
 			hostname = "—"
+		}
+		domain := h.Domain
+		if domain == "" {
+			domain = "—"
 		}
 		pwnd := "✗"
 		if h.Pwned {
@@ -261,10 +284,10 @@ func printHostsMarkdown(hosts []dbpkg.HostRow) {
 		}
 		tag := h.Tag
 		if tag == "" {
-			tag = "UNKNOW"
+			tag = "UNKNOWN"
 		}
-		fmt.Printf("| %s | %s | %s | %s | %s |\n",
-			h.IP, hostname, pwnd, tag, formatPortsCompact(h.Ports))
+		fmt.Printf("| %s | %s | %s | %s | %s | %s |\n",
+			h.IP, hostname, domain, pwnd, tag, formatPortsCompact(h.Ports))
 	}
 }
 
