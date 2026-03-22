@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2026-03-22] — continued
+
+### Added
+- **`domain` field on `hosts`** — new column (auto-migrated, `DEFAULT ''`) storing
+  the Windows AD domain for a host (e.g. `cowmotors.com`).
+- **`Host.Domain`** in `models.go`; propagated through `UpsertHost`, `HostRow`,
+  `ListHosts`, `HostUpdate`/`UpdateHost`.
+- **Domain extraction from `smb-os-discovery`** — parser reads the `domain` elem
+  from the nmap hostscript output and stores it in `Host.Domain`.
+- **Domain saved from `nxc` SMB probe** — `probeSMBHostnames` now persists
+  `SMBInfo.Domain` alongside the computer name.
+- **DOMAIN column in `net-scan list`** — shown between HOSTNAME and PWND in the
+  terminal table and markdown output; included in JSON output automatically.
+  Rendered dim when unknown (`—`).
+- **`edit --domain`** flag for manually setting or clearing the AD domain of a host.
+
 ## [2026-03-22]
 
 ### Added
