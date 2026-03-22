@@ -40,11 +40,36 @@ These flags are available on every command:
 
 ```
 --db string         Override SQLite DB path (default: ~/.pwnbox/network.db)
+--config string     Override config file path (default: ~/.pwnbox/net-scan.yaml)
 -d, --debug         Print the exact nmap command before executing
 -v, --verbose       Print full nmap output (default: Phase 1 shows discovered ports only, Phase 2 is silent)
 ```
 
 ---
+
+## Configuration
+
+On first run, `net-scan` creates `~/.pwnbox/net-scan.yaml` with annotated default
+nmap command templates:
+
+```yaml
+scan:
+  phase1: "nmap -p- -v --min-rate={{RATE}} -oX {{OUTPUT}} {{TARGET}}"
+  phase2: "nmap -p {{PORTS}} -sV -sC -oX {{OUTPUT}} {{TARGET}}"
+  version: "nmap -p {{PORTS}} -sV -oX {{OUTPUT}} {{TARGET}}"
+```
+
+Available placeholders:
+
+| Placeholder   | Description                              | Required in         |
+|---------------|------------------------------------------|---------------------|
+| `{{TARGET}}`  | IP, CIDR, or space-separated target list | phase1              |
+| `{{OUTPUT}}`  | Path to the `-oX` XML output file        | all templates       |
+| `{{PORTS}}`   | Comma-separated port list                | phase2, version     |
+| `{{RATE}}`    | Value of `--threads` / `--min-rate`      | phase1 (optional)   |
+
+> **Note:** The leading `nmap` token is stripped before execution — `sudo` (and `proxychains`
+> when `--proxy` is set) are always prepended by the tool. Do not include them in the template.
 
 ## Commands
 

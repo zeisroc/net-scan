@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [2026-03-22] — continued
 
 ### Added
+- **nmap command templates** — `~/.pwnbox/net-scan.yaml` is created on first run
+  with annotated default templates for Phase 1, Phase 2, and version scans.
+  Placeholders: `{{TARGET}}`, `{{OUTPUT}}`, `{{PORTS}}`, `{{RATE}}`.
+  Edit the file to customise nmap flags without touching the source code.
+- **`--config` global flag** — override the config file path
+  (default: `~/.pwnbox/net-scan.yaml`).
+
+### Added
 - **`domain` field on `hosts`** — new column (auto-migrated, `DEFAULT ''`) storing
   the Windows AD domain for a host (e.g. `cowmotors.com`).
 - **`Host.Domain`** in `models.go`; propagated through `UpsertHost`, `HostRow`,
