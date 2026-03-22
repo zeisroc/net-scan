@@ -316,23 +316,12 @@ func runScanEnrich(cmd *cobra.Command, args []string) error {
 			fmt.Printf("[!] Could not mark phase2_done for %s: %v\n", host.IP, err)
 		}
 
-		// Probe SMB for hostname if 445 was open but smb-os-discovery did not fire.
-		// Build a synthetic host entry so probeSMBHostnames can check for 445 and
-		// an empty hostname using the same logic as in the main scan pipeline.
-		if host.Hostname == "" && containsInt(host.TCPPorts, 445) {
-			hostnameFromPhase2 := ""
-			for _, ph := range parsed {
-				if ph.Hostname != "" {
-					hostnameFromPhase2 = ph.Hostname
-					break
-				}
-			}
-			if hostnameFromPhase2 == "" {
-				probeSMBHostnames([]models.Host{{
-					IP:    host.IP,
-					Ports: []models.OpenPort{{Port: 445, Protocol: "tcp"}},
-				}}, scanProxy)
-			}
+		// Always probe SMB for hostname/domain on hosts with 445/tcp.
+		if containsInt(host.TCPPorts, 445) {
+			probeSMBHostnames([]models.Host{{
+				IP:    host.IP,
+				Ports: []models.OpenPort{{Port: 445, Protocol: "tcp"}},
+			}}, scanProxy)
 		}
 
 		enriched = append(enriched, parsed...)
@@ -552,15 +541,12 @@ func intSliceToStrings(ints []int) []string {
 	return out
 }
 
-// probeSMBHostnames probes hosts that have port 445/tcp open but no hostname
-// using nxc (netexec) SMB negotiation — reliable for Windows AD machines even
-// when nmap's smb-os-discovery script fails. Updates the DB on success.
+// probeSMBHostnames probes every host that has port 445/tcp open using nxc
+// (netexec) SMB negotiation. This is the sole source of hostname and domain
+// for Windows AD machines, ensuring consistent formatting across all scans.
 // Silently skips if nxc is not installed.
 func probeSMBHostnames(hosts []models.Host, proxy string) {
 	for _, h := range hosts {
-		if h.Hostname != "" {
-			continue
-		}
 		if !hasTCPPort(h, 445) {
 			continue
 		}
