@@ -67,6 +67,7 @@ func Open(path string) (*sql.DB, error) {
 	// Migrations — all are no-ops if the column already exists.
 	_, _ = db.Exec(`ALTER TABLE host_metadata ADD COLUMN pwned INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE hosts ADD COLUMN phase2_done INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE hosts ADD COLUMN domain TEXT NOT NULL DEFAULT ''`)
 
 	// Enable foreign keys and WAL mode for better concurrency.
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;`); err != nil {

@@ -26,15 +26,16 @@ func MergeSource(existing, newSrc string) string {
 func UpsertHost(db *sql.DB, h models.Host) (int64, error) {
 	// Try to insert; on conflict update non-key fields.
 	_, err := db.Exec(`
-		INSERT INTO hosts (ip, hostname, os_guess, source, project)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO hosts (ip, hostname, os_guess, domain, source, project)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(ip) DO UPDATE SET
 			hostname  = CASE WHEN excluded.hostname  != '' THEN excluded.hostname  ELSE hosts.hostname  END,
 			os_guess  = CASE WHEN excluded.os_guess  != '' THEN excluded.os_guess  ELSE hosts.os_guess  END,
+			domain    = CASE WHEN excluded.domain    != '' THEN excluded.domain    ELSE hosts.domain    END,
 			source    = hosts.source, -- merged below
 			project   = CASE WHEN excluded.project   != '' THEN excluded.project   ELSE hosts.project   END,
 			updated_at = CURRENT_TIMESTAMP
-	`, h.IP, h.Hostname, h.OSGuess, h.Source, h.Project)
+	`, h.IP, h.Hostname, h.OSGuess, h.Domain, h.Source, h.Project)
 	if err != nil {
 		return 0, fmt.Errorf("upsert host %s: %w", h.IP, err)
 	}
@@ -181,6 +182,7 @@ type PortInfo struct {
 type HostRow struct {
 	IP       string
 	Hostname string
+	Domain   string
 	Pwned    bool
 	Tag      string
 	Project  string
@@ -246,6 +248,7 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 	// still appear. When op.port is NULL the port filter conditions must be skipped.
 	query := `
 		SELECT h.ip, COALESCE(h.hostname,''),
+		       COALESCE(h.domain,''),
 		       COALESCE(hm.pwned, 0),
 		       op.port, COALESCE(op.protocol,''),
 		       COALESCE(op.service,''), COALESCE(op.version,''),
@@ -284,10 +287,10 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 	grouped := map[string]*HostRow{}
 
 	for rows.Next() {
-		var ip, hostname, protocol, service, version, source, project string
+		var ip, hostname, domain, protocol, service, version, source, project string
 		var pwnedInt int
 		var port sql.NullInt64
-		if err := rows.Scan(&ip, &hostname, &pwnedInt, &port, &protocol,
+		if err := rows.Scan(&ip, &hostname, &domain, &pwnedInt, &port, &protocol,
 			&service, &version, &source, &project); err != nil {
 			return nil, fmt.Errorf("scan host row: %w", err)
 		}
@@ -297,6 +300,7 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 			host = &HostRow{
 				IP:       ip,
 				Hostname: hostname,
+				Domain:   domain,
 				Pwned:    pwnedInt != 0,
 				Project:  project,
 			}

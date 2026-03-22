@@ -7,6 +7,7 @@ type Host struct {
 	ID        int64
 	IP        string
 	Hostname  string
+	Domain    string // Windows AD domain (e.g. "corp.local")
 	OSGuess   string
 	Source    string // comma-separated: 'nmap', 'sharpscan', 'WEB05', etc.
 	Project   string

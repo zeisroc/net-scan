@@ -8,6 +8,7 @@ import (
 
 type HostUpdate struct {
 	Hostname  *string
+	Domain    *string
 	OSGuess   *string
 	Source    *string
 	Project   *string
@@ -16,7 +17,7 @@ type HostUpdate struct {
 }
 
 func (u HostUpdate) HasChanges() bool {
-	return u.Hostname != nil || u.OSGuess != nil || u.Source != nil || u.Project != nil || u.ManualTag != nil || u.Pwned != nil
+	return u.Hostname != nil || u.Domain != nil || u.OSGuess != nil || u.Source != nil || u.Project != nil || u.ManualTag != nil || u.Pwned != nil
 }
 
 type PortUpdate struct {
@@ -55,6 +56,10 @@ func UpdateHost(db *sql.DB, ip string, update HostUpdate) error {
 	if update.Hostname != nil {
 		assignments = append(assignments, "hostname = ?")
 		args = append(args, strings.TrimSpace(*update.Hostname))
+	}
+	if update.Domain != nil {
+		assignments = append(assignments, "domain = ?")
+		args = append(args, strings.TrimSpace(*update.Domain))
 	}
 	if update.OSGuess != nil {
 		assignments = append(assignments, "os_guess = ?")
