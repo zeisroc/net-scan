@@ -27,14 +27,14 @@ var (
 // No authentication is required — the data comes from the SMB negotiate response.
 //
 // Returns (nil, nil) if nxc is not installed or the banner cannot be parsed.
-// When proxy is non-empty, the command is run through proxychains.
-func RunNxcSMB(ip, proxy string) (*SMBInfo, error) {
+// When proxychainsConf is non-empty, the command is run through proxychains.
+func RunNxcSMB(ip, proxychainsConf string) (*SMBInfo, error) {
 	nxcBin, err := exec.LookPath("nxc")
 	if err != nil {
 		return nil, nil // nxc not installed; caller should skip silently
 	}
 
-	args := buildNxcArgs(nxcBin, proxy, ip)
+	args := buildNxcArgs(nxcBin, proxychainsConf, ip)
 	var out bytes.Buffer
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdout = &out
@@ -47,10 +47,10 @@ func RunNxcSMB(ip, proxy string) (*SMBInfo, error) {
 	return parseNxcSMBOutput(out.String()), nil
 }
 
-func buildNxcArgs(nxcBin, proxy, ip string) []string {
+func buildNxcArgs(nxcBin, proxychainsConf, ip string) []string {
 	var args []string
-	if proxy != "" {
-		args = append(args, "proxychains", "-q")
+	if proxychainsConf != "" {
+		args = append(args, proxychainsPrefix(proxychainsConf)...)
 	}
 	args = append(args, nxcBin, "smb", ip)
 	return args

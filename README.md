@@ -22,7 +22,7 @@ make build          # output: bin/net-scan
 go build -o net-scan ./cmd/net-scan/
 ```
 
-> **Requires:** `nmap` and `sudo` on PATH. `proxychains` only needed when `--proxy` is used.
+> **Requires:** `nmap` and `sudo` on PATH. `proxychains` only needed when `--proxychains` is used.
 
 ---
 
@@ -69,7 +69,7 @@ Available placeholders:
 | `{{RATE}}`    | Value of `--threads` / `--min-rate`      | phase1 (optional)   |
 
 > **Note:** The leading `nmap` token is stripped before execution — `sudo` (and `proxychains`
-> when `--proxy` is set) are always prepended by the tool. Do not include them in the template.
+> when `--proxychains` is set) are always prepended by the tool. Do not include them in the template.
 
 ## Commands
 
@@ -79,7 +79,7 @@ Two-phase pipeline under `sudo`:
 
 1. **Phase 1** — `nmap -p- -v --min-rate 5000` — discovers all open TCP ports  
    By default only `Discovered open port` lines are printed live. Use `-v` for full nmap output.  
-   When `--proxy` is used, `-sT` (TCP connect scan) is automatically added — SYN scans require raw sockets that cannot be routed through a SOCKS proxy.
+   When `--proxychains` is set, `-sT` (TCP connect scan) is automatically added — SYN scans require raw sockets that cannot be routed through a SOCKS proxy.
 2. **Phase 2** — `nmap -p <ports> -sV -sC` on the exact ports found per host — enriches with service/version data  
    Silent by default; use `-v` for full output. Results are strictly filtered to ports confirmed in Phase 1 — Phase 2 cannot introduce new ports.  
    When port 445 is open, the `smb-os-discovery` script (included via `-sC`) extracts the Windows machine name and OS directly from SMB — more reliable than reverse DNS for AD environments.
@@ -100,8 +100,11 @@ net-scan scan -t targets.txt
 # Fast port-only scan (skip service detection)
 net-scan scan -t 10.10.10.1 --ports-only
 
-# Route through proxychains (SOCKS5 pivot)
-net-scan scan -t 172.16.0.0/24 --proxy 127.0.0.1:1080
+# Route through proxychains (default config /etc/proxychains.conf)
+net-scan scan -t 172.16.0.0/24 --proxychains
+
+# Route with a custom proxychains config
+net-scan scan -t 172.16.0.0/24 --proxychains /etc/proxychains4.conf
 
 # Custom rate and output directory
 net-scan scan -t 10.0.0.1 --threads 1000 --output-dir /tmp/scans
@@ -112,12 +115,12 @@ net-scan scan -t 10.10.10.1 -d -v
 
 **Flags:**
 ```
--t, --target       Target: IP, CIDR, comma-separated list, or file path (required)
-    --project      Engagement label
-    --ports-only   Skip -sV/-sC phase (Phase 1 only)
-    --proxy        SOCKS5 host:port (via proxychains)
-    --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
-    --threads      nmap --min-rate (default: 5000)
+-t, --target        Target: IP, CIDR, comma-separated list, or file path (required)
+    --project       Engagement label
+    --ports-only    Skip -sV/-sC phase (Phase 1 only)
+    --proxychains   Route via proxychains; optional config path (default: /etc/proxychains.conf)
+    --output-dir    Directory for raw nmap XML (default: ~/.pwnbox/scans/)
+    --threads       nmap --min-rate (default: 5000)
 ```
 
 #### `scan version` — Re-scan stored assets with `-sV`
@@ -130,8 +133,8 @@ executes `nmap -sV` per host on those exact ports.
 # Re-scan every stored asset and known port with version detection
 net-scan scan version
 
-# Route the version scan through a SOCKS5 pivot
-net-scan scan version --proxy 127.0.0.1:1080
+# Route the version scan through proxychains
+net-scan scan version --proxychains
 
 # Save XML output somewhere else
 net-scan scan version --output-dir /tmp/scans
@@ -139,7 +142,7 @@ net-scan scan version --output-dir /tmp/scans
 
 **Flags:**
 ```
-    --proxy        SOCKS5 host:port (via proxychains)
+    --proxychains  Route via proxychains; optional config path (default: /etc/proxychains.conf)
     --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
 ```
 
@@ -158,8 +161,8 @@ net-scan scan enrich
 # Only enrich hosts from a specific project
 net-scan scan enrich --project corp-internal
 
-# Route through a SOCKS5 proxy
-net-scan scan enrich --proxy 127.0.0.1:1080
+# Route through proxychains
+net-scan scan enrich --proxychains
 
 # Re-run Phase 2 on every host regardless of prior enrichment
 net-scan scan enrich --all
@@ -167,7 +170,7 @@ net-scan scan enrich --all
 
 **Flags:**
 ```
-    --proxy        SOCKS5 host:port (via proxychains)
+    --proxychains  Route via proxychains; optional config path (default: /etc/proxychains.conf)
     --output-dir   Directory for raw nmap XML (default: ~/.pwnbox/scans/)
     --project      Only enrich hosts from this project
     --all          Re-run Phase 2 even on already-enriched hosts

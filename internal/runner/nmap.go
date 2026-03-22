@@ -15,14 +15,14 @@ import (
 
 // NmapRunner holds configuration for executing nmap.
 type NmapRunner struct {
-	OutputDir       string // directory to save XML files
-	MinRate         int
-	Proxy           string // SOCKS5 host:port via proxychains; empty = no proxy
-	Debug           bool   // print the full nmap command before running
-	Verbose         bool   // print full nmap output; default prints only discovered-port lines
-	Phase1Template  string // nmap command template for all-ports discovery
-	Phase2Template  string // nmap command template for service/version detection
-	VersionTemplate string // nmap command template for DB-driven version scan
+	OutputDir        string // directory to save XML files
+	MinRate          int
+	ProxychainsConf  string // path to proxychains config file; empty = no proxy
+	Debug            bool   // print the full nmap command before running
+	Verbose          bool   // print full nmap output; default prints only discovered-port lines
+	Phase1Template   string // nmap command template for all-ports discovery
+	Phase2Template   string // nmap command template for service/version detection
+	VersionTemplate  string // nmap command template for DB-driven version scan
 }
 
 // targetArgs parses the raw --target value and returns the nmap target arguments.
@@ -80,7 +80,7 @@ func (r *NmapRunner) RunAllPorts(target string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("expand phase1 template: %w", err)
 	}
-	if r.Proxy != "" && !containsFlag(nmapArgs, "-sT") {
+	if r.ProxychainsConf != "" && !containsFlag(nmapArgs, "-sT") {
 		nmapArgs = append([]string{"-sT"}, nmapArgs...)
 	}
 	return xmlPath, r.run(r.buildArgs(nmapArgs), true)
@@ -104,7 +104,7 @@ func (r *NmapRunner) RunServiceDetection(target, ports string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("expand phase2 template: %w", err)
 	}
-	if r.Proxy != "" && !containsFlag(nmapArgs, "-sT") {
+	if r.ProxychainsConf != "" && !containsFlag(nmapArgs, "-sT") {
 		nmapArgs = append([]string{"-sT"}, nmapArgs...)
 	}
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
@@ -130,17 +130,18 @@ func (r *NmapRunner) RunVersionDetection(target string, tcpPorts, udpPorts []int
 	}
 	// Prepend any extra args from buildVersionScanArgs (e.g. -sU for UDP).
 	nmapArgs = append(extraArgs, nmapArgs...)
-	if r.Proxy != "" && !containsFlag(nmapArgs, "-sT") {
+	if r.ProxychainsConf != "" && !containsFlag(nmapArgs, "-sT") {
 		nmapArgs = append([]string{"-sT"}, nmapArgs...)
 	}
 	return xmlPath, r.run(r.buildArgs(nmapArgs), false)
 }
 
-// buildArgs assembles the full command: [proxychains -q] sudo nmap <nmapArgs...>
+// buildArgs assembles the full command: [proxychains [-f conf]] sudo nmap <nmapArgs...>
+// When ProxychainsConf is set, proxychains is prepended; -f is used for non-default configs.
 func (r *NmapRunner) buildArgs(nmapArgs []string) []string {
 	var args []string
-	if r.Proxy != "" {
-		args = append(args, "proxychains", "-q")
+	if r.ProxychainsConf != "" {
+		args = append(args, proxychainsPrefix(r.ProxychainsConf)...)
 	}
 	args = append(args, "sudo", "nmap")
 	args = append(args, nmapArgs...)
@@ -242,6 +243,16 @@ func expandTemplate(tmpl, target, ports, xmlPath string, rate int) ([]string, er
 		return nil, fmt.Errorf("template expanded to an empty argument list")
 	}
 	return args, nil
+}
+
+// proxychainsPrefix returns the proxychains command prefix for the given config
+// file path. When the path is the default (/etc/proxychains.conf or
+// /etc/proxychains4.conf) the -f flag is omitted; otherwise -f <path> is used.
+func proxychainsPrefix(conf string) []string {
+	if conf == "/etc/proxychains.conf" || conf == "/etc/proxychains4.conf" {
+		return []string{"proxychains"}
+	}
+	return []string{"proxychains", "-f", conf}
 }
 
 // containsFlag reports whether flag is present in the args slice.

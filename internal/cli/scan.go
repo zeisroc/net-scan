@@ -17,16 +17,18 @@ import (
 )
 
 var (
-	scanTarget    string
-	scanProject   string
-	scanPortsOnly bool
-	scanProxy     string
-	scanOutputDir string
-	scanThreads   int
+	scanTarget       string
+	scanProject      string
+	scanPortsOnly    bool
+	scanProxychains  string
+	scanOutputDir    string
+	scanThreads      int
 
 	enrichProject string
 	enrichAll     bool
 )
+
+const defaultProxychainsConf = "/etc/proxychains.conf"
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
@@ -41,7 +43,7 @@ Target formats accepted:
   Comma-separated:      -t 10.0.0.1,10.0.0.2,192.168.1.0/24
   File (one per line):  -t /tmp/targets.txt
 
-Both phases run under sudo. Use --proxy to route through proxychains.`,
+Both phases run under sudo. Use --proxychains to route through proxychains.`,
 	PreRunE: openDB,
 	RunE:    runScan,
 }
@@ -79,15 +81,18 @@ func init() {
 	scanCmd.Flags().StringVarP(&scanTarget, "target", "t", "", "Target: IP, CIDR, comma-separated list, or file path (required)")
 	scanCmd.Flags().StringVar(&scanProject, "project", "", "Engagement label")
 	scanCmd.Flags().BoolVar(&scanPortsOnly, "ports-only", false, "Only run all-ports scan (skip -sV/-sC)")
-	scanCmd.Flags().StringVar(&scanProxy, "proxy", "", "SOCKS5 proxy host:port (via proxychains)")
+	scanCmd.Flags().StringVar(&scanProxychains, "proxychains", "", "Route via proxychains (optional config path; defaults to /etc/proxychains.conf)")
+	scanCmd.Flags().Lookup("proxychains").NoOptDefVal = defaultProxychainsConf
 	scanCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
 	scanCmd.Flags().IntVar(&scanThreads, "threads", 5000, "nmap --min-rate value")
 	_ = scanCmd.MarkFlagRequired("target")
 
-	scanVersionCmd.Flags().StringVar(&scanProxy, "proxy", "", "SOCKS5 proxy host:port (via proxychains)")
+	scanVersionCmd.Flags().StringVar(&scanProxychains, "proxychains", "", "Route via proxychains (optional config path; defaults to /etc/proxychains.conf)")
+	scanVersionCmd.Flags().Lookup("proxychains").NoOptDefVal = defaultProxychainsConf
 	scanVersionCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
 
-	scanEnrichCmd.Flags().StringVar(&scanProxy, "proxy", "", "SOCKS5 proxy host:port (via proxychains)")
+	scanEnrichCmd.Flags().StringVar(&scanProxychains, "proxychains", "", "Route via proxychains (optional config path; defaults to /etc/proxychains.conf)")
+	scanEnrichCmd.Flags().Lookup("proxychains").NoOptDefVal = defaultProxychainsConf
 	scanEnrichCmd.Flags().StringVar(&scanOutputDir, "output-dir", defaultOut, "Directory for raw nmap XML output")
 	scanEnrichCmd.Flags().StringVar(&enrichProject, "project", "", "Only enrich hosts belonging to this project")
 	scanEnrichCmd.Flags().BoolVar(&enrichAll, "all", false, "Re-run Phase 2 even on already-enriched hosts")
@@ -101,7 +106,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	r := &runner.NmapRunner{
 		OutputDir:      scanOutputDir,
 		MinRate:        scanThreads,
-		Proxy:          scanProxy,
+		ProxychainsConf: scanProxychains,
 		Debug:          debug,
 		Verbose:        verbose,
 		Phase1Template: gConfig.Scan.Phase1,
@@ -171,7 +176,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// For Windows hosts where smb-os-discovery did not fire, fall back to
 	// a direct nxc SMB probe to retrieve the computer name and domain.
-	probeSMBHostnames(hosts2, scanProxy)
+	probeSMBHostnames(hosts2, scanProxychains)
 
 	printHostsSummary(hosts2)
 	return nil
@@ -195,7 +200,7 @@ func runScanVersion(cmd *cobra.Command, args []string) error {
 
 	r := &runner.NmapRunner{
 		OutputDir:       scanOutputDir,
-		Proxy:           scanProxy,
+		ProxychainsConf: scanProxychains,
 		Debug:           debug,
 		Verbose:         verbose,
 		VersionTemplate: gConfig.Scan.Version,
@@ -276,7 +281,7 @@ func runScanEnrich(cmd *cobra.Command, args []string) error {
 
 	r := &runner.NmapRunner{
 		OutputDir:      scanOutputDir,
-		Proxy:          scanProxy,
+		ProxychainsConf: scanProxychains,
 		Debug:          debug,
 		Verbose:        verbose,
 		Phase2Template: gConfig.Scan.Phase2,
@@ -321,7 +326,7 @@ func runScanEnrich(cmd *cobra.Command, args []string) error {
 			probeSMBHostnames([]models.Host{{
 				IP:    host.IP,
 				Ports: []models.OpenPort{{Port: 445, Protocol: "tcp"}},
-			}}, scanProxy)
+			}}, scanProxychains)
 		}
 
 		enriched = append(enriched, parsed...)
@@ -545,14 +550,14 @@ func intSliceToStrings(ints []int) []string {
 // (netexec) SMB negotiation. This is the sole source of hostname and domain
 // for Windows AD machines, ensuring consistent formatting across all scans.
 // Silently skips if nxc is not installed.
-func probeSMBHostnames(hosts []models.Host, proxy string) {
+func probeSMBHostnames(hosts []models.Host, proxychainsConf string) {
 	for _, h := range hosts {
 		if !hasTCPPort(h, 445) {
 			continue
 		}
 
 		fmt.Printf("[*] SMB probe — %s\n", h.IP)
-		info, err := runner.RunNxcSMB(h.IP, proxy)
+		info, err := runner.RunNxcSMB(h.IP, proxychainsConf)
 		if err != nil {
 			fmt.Printf("[!] SMB probe error for %s: %v\n", h.IP, err)
 			continue

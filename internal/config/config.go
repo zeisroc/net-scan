@@ -143,8 +143,8 @@ const defaultConfigYAML = `# net-scan — nmap command templates
 #
 # Notes:
 #   • Leading "nmap" is optional — it is stripped and re-added with sudo.
-#   • When --proxy is set, "proxychains -q" is prepended automatically and
-#     -sT is injected if it is not already present in the template.
+#   • When --proxychains is set, "proxychains [-f config]" is prepended
+#     automatically and -sT is injected if not already present in the template.
 #   • -oX {{OUTPUT}} must be kept in every template or results cannot be parsed.
 
 scan:

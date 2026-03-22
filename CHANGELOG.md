@@ -7,8 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [2026-03-22] — continued
 
-### Added
-- **nmap command templates** — `~/.pwnbox/net-scan.yaml` is created on first run
+### Changed
+- **`--proxy host:port` → `--proxychains [config_path]`** — proxy routing now uses
+  proxychains directly instead of an ad-hoc SOCKS5 address.
+  - `--proxychains` (no value) uses `/etc/proxychains.conf`
+  - `--proxychains /custom/path.conf` passes `-f <path>` to proxychains
+  - `-sT` is still injected automatically when proxychains is active
+  - Available on `scan`, `scan version`, and `scan enrich`
+- **SMB hostname/domain via nxc exclusively** — removed `smb-os-discovery` nmap
+  script parsing; nxc is now the sole source for hostname and domain to guarantee
+  consistent formatting across all scans. `probeSMBHostnames` now always probes
+  every host with `445/tcp` open.
+
+
   with annotated default templates for Phase 1, Phase 2, and version scans.
   Placeholders: `{{TARGET}}`, `{{OUTPUT}}`, `{{PORTS}}`, `{{RATE}}`.
   Edit the file to customise nmap flags without touching the source code.
