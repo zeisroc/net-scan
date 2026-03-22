@@ -154,6 +154,7 @@ type PortFilter struct {
 	Port    int
 	Service string
 	Project string
+	Domain  string // exact match; use sentinel value "none" to filter hosts with no domain
 }
 
 // ListRow is a flat result row for display.
@@ -274,6 +275,12 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 	if f.Project != "" {
 		query += ` AND h.project = ?`
 		args = append(args, f.Project)
+	}
+	if f.Domain == "none" {
+		query += ` AND COALESCE(h.domain,'') = ''`
+	} else if f.Domain != "" {
+		query += ` AND h.domain = ?`
+		args = append(args, f.Domain)
 	}
 	query += ` ORDER BY h.ip, op.port`
 

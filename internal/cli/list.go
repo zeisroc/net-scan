@@ -17,6 +17,7 @@ var (
 	listPort    int
 	listService string
 	listProject string
+	listDomain  string
 	listJSON    bool
 	listMD      bool
 )
@@ -33,6 +34,7 @@ func init() {
 	listCmd.Flags().IntVarP(&listPort, "port", "p", 0, "Filter by port number")
 	listCmd.Flags().StringVarP(&listService, "service", "s", "", "Filter by service name (partial match)")
 	listCmd.Flags().StringVar(&listProject, "project", "", "Filter by project label")
+	listCmd.Flags().StringVar(&listDomain, "domain", "", `Filter by domain (exact match); use "none" for hosts with no domain`)
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
 	listCmd.Flags().BoolVarP(&listMD, "markdown", "m", false, "Output as markdown table")
 	rootCmd.AddCommand(listCmd)
@@ -44,6 +46,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		Port:    listPort,
 		Service: listService,
 		Project: listProject,
+		Domain:  listDomain,
 	})
 	if err != nil {
 		return err
