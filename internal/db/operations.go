@@ -155,6 +155,38 @@ type PortFilter struct {
 	Service string
 	Project string
 	Domain  string // exact match; use sentinel value "none" to filter hosts with no domain
+	Source  string // exact or partial match on source names (comma-separated in DB)
+}
+
+// ListSources returns all distinct source names stored in the database (hosts + open_ports).
+func ListSources(db *sql.DB) ([]string, error) {
+	rows, err := db.Query(`
+		SELECT DISTINCT value FROM (
+			SELECT DISTINCT TRIM(value) AS value FROM hosts,
+				json_each('["' || REPLACE(COALESCE(source,''), ', ', '","') || '"]')
+			WHERE COALESCE(source,'') != ''
+			UNION
+			SELECT DISTINCT TRIM(value) AS value FROM open_ports op
+			JOIN hosts h ON op.host_id = h.id,
+				json_each('["' || REPLACE(COALESCE(op.source,''), ', ', '","') || '"]')
+			WHERE COALESCE(op.source,'') != ''
+		)
+		ORDER BY value
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, fmt.Errorf("scan source: %w", err)
+		}
+		sources = append(sources, s)
+	}
+	return sources, rows.Err()
 }
 
 // ListRow is a flat result row for display.
@@ -215,6 +247,10 @@ func ListPorts(db *sql.DB, f PortFilter) ([]ListRow, error) {
 	if f.Project != "" {
 		query += ` AND h.project = ?`
 		args = append(args, f.Project)
+	}
+	if f.Source != "" {
+		query += ` AND op.source LIKE ?`
+		args = append(args, "%"+f.Source+"%")
 	}
 	query += ` ORDER BY h.ip, op.port`
 
@@ -281,6 +317,10 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 	} else if f.Domain != "" {
 		query += ` AND h.domain = ?`
 		args = append(args, f.Domain)
+	}
+	if f.Source != "" {
+		query += ` AND op.source LIKE ?`
+		args = append(args, "%"+f.Source+"%")
 	}
 	query += ` ORDER BY h.ip, op.port`
 

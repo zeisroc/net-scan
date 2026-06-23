@@ -16,6 +16,7 @@ var (
 	ingestFormat     string
 	ingestSourceHost string
 	ingestProject    string
+	ingestSource     string
 )
 
 var ingestCmd = &cobra.Command{
@@ -37,6 +38,7 @@ func init() {
 	ingestCmd.Flags().StringVarP(&ingestFile, "file", "f", "", "Input file path (stdin if omitted)")
 	ingestCmd.Flags().StringVar(&ingestFormat, "format", "auto", "Input format: auto, sharpscan, nmap-xml")
 	ingestCmd.Flags().StringVar(&ingestSourceHost, "source-host", "", "Hostname/IP of the machine that ran the scan")
+	ingestCmd.Flags().StringVar(&ingestSource, "source", "", "Source name for this ingestion (defaults to detected hostname or 'manual')")
 	ingestCmd.Flags().StringVar(&ingestProject, "project", "", "Engagement label")
 	rootCmd.AddCommand(ingestCmd)
 }
@@ -81,12 +83,15 @@ func ingestSharpScan(f *os.File) error {
 		result.SourceIP = ingestSourceHost
 	}
 
-	source := result.SourceHostname
+	source := ingestSource
+	if source == "" {
+		source = result.SourceHostname
+	}
 	if source == "" {
 		source = result.SourceIP
 	}
 	if source == "" {
-		source = "sharpscan"
+		source = "manual"
 	}
 
 	for i := range result.Hosts {
@@ -107,9 +112,12 @@ func ingestSharpScan(f *os.File) error {
 }
 
 func ingestNmapXML(f *os.File) error {
-	source := ingestSourceHost
+	source := ingestSource
 	if source == "" {
-		source = "nmap"
+		source = ingestSourceHost
+	}
+	if source == "" {
+		source = "manual"
 	}
 
 	hosts, err := parser.ParseNmapXML(f, source)

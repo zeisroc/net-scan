@@ -18,6 +18,7 @@ var (
 	listService string
 	listProject string
 	listDomain  string
+	listSource  string
 	listJSON    bool
 	listMD      bool
 )
@@ -35,12 +36,53 @@ func init() {
 	listCmd.Flags().StringVarP(&listService, "service", "s", "", "Filter by service name (partial match)")
 	listCmd.Flags().StringVar(&listProject, "project", "", "Filter by project label")
 	listCmd.Flags().StringVar(&listDomain, "domain", "", `Filter by domain (exact match); use "none" for hosts with no domain`)
+	listCmd.Flags().StringVarP(&listSource, "source", "S", "", "Filter by source name (partial match); omit value to list available sources")
+	listCmd.Flags().Lookup("source").NoOptDefVal = "LIST"
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
 	listCmd.Flags().BoolVarP(&listMD, "markdown", "m", false, "Output as markdown table")
 	rootCmd.AddCommand(listCmd)
 }
 
 func runList(cmd *cobra.Command, args []string) error {
+	if listSource == "LIST" {
+		sources, err := dbpkg.ListSources(gDB)
+		if err != nil {
+			return err
+		}
+		if len(sources) == 0 {
+			fmt.Println("[i] No sources found.")
+			return nil
+		}
+		printSources(sources)
+		return nil
+	}
+	if listSource != "" {
+		hosts, err := dbpkg.ListHosts(gDB, dbpkg.PortFilter{
+			IP:      listHost,
+			Port:    listPort,
+			Service: listService,
+			Project: listProject,
+			Domain:  listDomain,
+			Source:  listSource,
+		})
+		if err != nil {
+			return err
+		}
+		if len(hosts) == 0 {
+			fmt.Println("[i] No results.")
+			return nil
+		}
+		switch {
+		case listJSON:
+			return printHostsJSON(hosts)
+		case listMD:
+			printHostsMarkdown(hosts)
+		default:
+			printHostsTable(hosts)
+		}
+		return nil
+	}
+
 	hosts, err := dbpkg.ListHosts(gDB, dbpkg.PortFilter{
 		IP:      listHost,
 		Port:    listPort,
@@ -66,6 +108,14 @@ func runList(cmd *cobra.Command, args []string) error {
 		printHostsTable(hosts)
 	}
 	return nil
+}
+
+func printSources(sources []string) {
+	fmt.Println("[i] Available sources:")
+	for _, s := range sources {
+		fmt.Printf("  - %s\n", s)
+	}
+	fmt.Println()
 }
 
 // ── ANSI constants ────────────────────────────────────────────────────────────
