@@ -12,7 +12,7 @@
 A Go wrapper around `nmap` that:
 1. Runs structured nmap scans (full port → service detection pipeline) against a target or subnet
 2. Stores all results in a SQLite database at `~/.pwnbox/network.db`
-3. Ingests output from other scanners (SharpScan available here: https://github.com/7own/SharpScan; executed on victim machines) into the same DB
+3. Ingests output from other scanners (SharpScan available here: https://github.com/zeisroc/SharpScan; executed on victim machines) into the same DB
 4. Is consumed by `credops` (to know which ports are open) and `pwnbox-tools` (for the full picture)
 
 ---

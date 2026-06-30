@@ -1,6 +1,6 @@
 # net-scan
 
-A Go wrapper around `nmap` that runs structured port scans, stores all results in a shared SQLite database (`~/.pwnbox/network.db`), ingests output from [SharpScan](https://github.com/7own/SharpScan) executed on victim machines, and exports data for `credops` and `nxc`.
+A Go wrapper around `nmap` that runs structured port scans, stores all results in a shared SQLite database (`~/.pwnbox/network.db`), ingests output from [SharpScan](https://github.com/zeisroc/SharpScan) executed on victim machines, and exports data for `credops` and `nxc`.
 
 Part of the **pwnbox** toolchain.
 
@@ -9,7 +9,7 @@ Part of the **pwnbox** toolchain.
 ## Installation
 
 ```bash
-go install github.com/pwnbox/net_scan/cmd/net-scan@latest
+go install github.com/zeisroc/net_scan/cmd/net-scan@latest
 ```
 
 Or build from source:
@@ -183,7 +183,7 @@ net-scan scan enrich --all
 
 ### `ingest` — Import scanner output from victim machines
 
-Import [SharpScan](https://github.com/7own/SharpScan) output or raw nmap XML collected from pivot machines.
+Import [SharpScan](https://github.com/zeisroc/SharpScan) output or raw nmap XML collected from pivot machines.
 
 Format is auto-detected from the file extension: `.xml` → `nmap-xml`, anything else → `sharpscan`. When reading from stdin, `sharpscan` is assumed.
 
