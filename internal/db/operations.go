@@ -152,6 +152,7 @@ func UpsertHosts(db *sql.DB, hosts []models.Host) (int, error) {
 type PortFilter struct {
 	IP      string
 	Port    int
+	Ports   []int
 	Service string
 	Project string
 	Domain  string // exact match; use sentinel value "none" to filter hosts with no domain
@@ -239,6 +240,11 @@ func ListPorts(db *sql.DB, f PortFilter) ([]ListRow, error) {
 	if f.Port > 0 {
 		query += ` AND op.port = ?`
 		args = append(args, f.Port)
+	} else if len(f.Ports) > 0 {
+		query += ` AND op.port IN (` + placeholders(len(f.Ports)) + `)`
+		for _, p := range f.Ports {
+			args = append(args, p)
+		}
 	}
 	if f.Service != "" {
 		query += ` AND op.service LIKE ?`
@@ -303,6 +309,11 @@ func ListHosts(db *sql.DB, f PortFilter) ([]HostRow, error) {
 	if f.Port > 0 {
 		query += ` AND op.port = ?`
 		args = append(args, f.Port)
+	} else if len(f.Ports) > 0 {
+		query += ` AND op.port IN (` + placeholders(len(f.Ports)) + `)`
+		for _, p := range f.Ports {
+			args = append(args, p)
+		}
 	}
 	if f.Service != "" {
 		query += ` AND op.service LIKE ?`
@@ -746,4 +757,11 @@ func appendUniqueTags(tags []string, candidate string) []string {
 	}
 
 	return append(tags, candidate)
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }

@@ -323,6 +323,12 @@ credops creds test -t mssql_targets.txt -P mssql
 # All hosts with SMB open for nxc
 net-scan export --port 445 --format nxc-list
 
+# Filter by multiple ports and print source assets
+net-scan export --print-sources -p 445,3389,5985,5986,22
+
+# Merge open ports per host on one line
+net-scan export --merge -p 22,443
+
 # Filter by project
 net-scan export --project corp-internal --format targets-file
 ```
@@ -333,12 +339,45 @@ net-scan export --project corp-internal --format targets-file
 | `targets-file` / `credops-targets` | One `IP:PORT` per line |
 | `nxc-list` | Space-separated unique IPs |
 
+With `--merge` (and no `--print-sources`), `targets-file` lines become one line per host:
+`IP:22,80,443`.
+
+With `--print-sources`, `targets-file` output is grouped into one `# Source` block per
+distinct source asset, listing every `IP:PORT` seen from that source (one port per line):
+
+```
+# Source1
+10.115.2.5:22
+10.115.2.5:443
+10.115.2.5:2000
+10.121.1.4:2000
+
+# Source2
+10.125.1.6:22
+10.125.1.6:2000
+```
+
+Combine with `--merge` to collapse each host's ports onto a single line within its source block:
+
+```
+# Source1
+10.115.2.5:22,443,2000
+10.121.1.4:2000
+
+# Source2
+10.125.1.6:22,2000
+```
+
+A port scanned from multiple sources appears in each corresponding `# Source` block.
+
 **Flags:**
 ```
     --format     targets-file | nxc-list | credops-targets (default: targets-file)
--p, --port       Filter by port
+-p, --port       Filter by port(s): 445 or 445,3389,5985
 -s, --service    Filter by service
     --project    Filter by project
+    --print-sources  Append source asset(s) to each line (targets-file only)
+    --merge          Merge ports per host into one line (targets-file only)
 ```
 
 ---
