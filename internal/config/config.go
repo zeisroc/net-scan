@@ -153,11 +153,11 @@ func expandPath(path string) (string, error) {
 const defaultConfigYAML = `# net-scan — configuration
 # Location: ~/.pwnbox/net-scan.yaml
 
-# ── nmap command templates ────────────────────────────────────────────────────
+# --- nmap command templates
 #
 # Edit these templates to customise the exact nmap flags used in each phase.
 #
-# Placeholders (substituted at runtime — do NOT remove the mandatory ones):
+# Placeholders (substituted at runtime - do NOT remove the mandatory ones):
 #   {{TARGET}}   resolved scan target: single IP, CIDR, or "-iL /path/to/file"
 #   {{OUTPUT}}   *** MANDATORY *** absolute path for the XML output file
 #                Removing this placeholder will cause a startup error.
@@ -165,17 +165,17 @@ const defaultConfigYAML = `# net-scan — configuration
 #   {{RATE}}     value of the --threads flag (default: 5000)
 #
 # Notes:
-#   • Leading "nmap" is optional — it is stripped and re-added with sudo.
-#   • When --proxychains is set, "proxychains -q [-f config]" is prepended
+#   - Leading "nmap" is optional - it is stripped and re-added with sudo.
+#   - When --proxychains is set, "proxychains -q [-f config]" is prepended
 #     automatically and -sT is injected if not already present in the template.
-#   • -oX {{OUTPUT}} must be kept in every template or results cannot be parsed.
+#   - -oX {{OUTPUT}} must be kept in every template or results cannot be parsed.
 
 scan:
   phase1:  "nmap -p- -v --min-rate={{RATE}} -oX {{OUTPUT}} {{TARGET}}"
   phase2:  "nmap -p {{PORTS}} -sV -sC -oX {{OUTPUT}} {{TARGET}}"
   version: "nmap -sV -p {{PORTS}} -oX {{OUTPUT}} {{TARGET}}"
 
-# ── Interesting ports ─────────────────────────────────────────────────────────
+# --- Interesting ports
 #
 # Ports in this list are highlighted in red in "net-scan list" output.
 # Add or remove entries to match your engagement scope.
