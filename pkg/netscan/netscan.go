@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/pwnbox/net_scan/internal/config"
@@ -41,6 +42,21 @@ type NmapOptions struct {
 	Debug        bool
 	Verbose      bool
 	Threads      int
+	OutputWriter io.Writer
+}
+
+// EnrichOptions configures Phase 2 enrichment for hosts already present in the
+// database but not yet service-enriched.
+type EnrichOptions struct {
+	DBPath       string
+	ConfigPath   string
+	Project      string
+	OutputDir    string
+	All          bool
+	Sudo         bool
+	Proxychains  string
+	Debug        bool
+	Verbose      bool
 	OutputWriter io.Writer
 }
 
@@ -109,6 +125,7 @@ func RunNmap(opts NmapOptions) error {
 	if strings.TrimSpace(opts.Target) == "" {
 		return fmt.Errorf("target is required")
 	}
+
 	if opts.Threads <= 0 {
 		opts.Threads = 5000
 	}
@@ -185,6 +202,83 @@ func RunNmap(opts NmapOptions) error {
 	return nil
 }
 
+// Enrich runs Phase 2 service/version detection for unenriched project hosts.
+func Enrich(opts EnrichOptions) error {
+	if opts.OutputDir == "" {
+		return fmt.Errorf("output dir is required")
+	}
+	db, err := dbpkg.Open(opts.DBPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer db.Close()
+
+	cfg, err := config.Load(opts.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	rows, err := dbpkg.ListUnenrichedTargets(db, opts.Project, opts.All)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		if opts.All {
+			out(opts.OutputWriter, "[i] No stored TCP ports found.\n")
+		} else {
+			out(opts.OutputWriter, "[i] No unenriched hosts found.\n")
+		}
+		return nil
+	}
+
+	r := &runner.NmapRunner{
+		OutputDir:       opts.OutputDir,
+		Sudo:            opts.Sudo,
+		ProxychainsConf: opts.Proxychains,
+		Debug:           opts.Debug,
+		Verbose:         opts.Verbose,
+		Phase2Template:  cfg.Scan.Phase2,
+	}
+
+	hosts := groupVersionTargets(rows)
+	if len(hosts) == 0 {
+		out(opts.OutputWriter, "[i] No valid stored ports found.\n")
+		return nil
+	}
+
+	var enriched []models.Host
+	var failures []string
+	for _, host := range hosts {
+		portList := strings.Join(intSliceToStrings(host.TCPPorts), ",")
+		out(opts.OutputWriter, "\n[*] Enrich - %s (%d tcp port(s))\n\n", host.IP, len(host.TCPPorts))
+		xmlPath, err := r.RunServiceDetection(host.IP, portList)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", host.IP, err))
+			continue
+		}
+
+		parsed, err := parser.ParseNmapXMLFile(xmlPath, "nmap")
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: parse xml: %v", host.IP, err))
+			continue
+		}
+		filterToKnownPorts(parsed, host.portSet())
+		applyProject(parsed, host.Project)
+		if _, err := dbpkg.UpsertHosts(db, parsed); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: save results: %v", host.IP, err))
+			continue
+		}
+		_ = dbpkg.MarkPhase2Done(db, host.IP)
+		enriched = append(enriched, parsed...)
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("enrich failed for %d host(s): %s", len(failures), strings.Join(failures, "; "))
+	}
+	out(opts.OutputWriter, "[+] Enriched %d host(s)\n", len(enriched))
+	return nil
+}
+
 func detectFormat(path string) string {
 	if strings.ToLower(filepath.Ext(path)) == ".xml" {
 		return "nmap-xml"
@@ -258,4 +352,80 @@ func portKey(ip, protocol string, port int) string {
 		proto = "tcp"
 	}
 	return fmt.Sprintf("%s|%s|%d", ip, proto, port)
+}
+
+type versionTargetHost struct {
+	IP       string
+	Hostname string
+	Project  string
+	TCPPorts []int
+}
+
+func groupVersionTargets(rows []dbpkg.VersionTargetRow) []versionTargetHost {
+	order := make([]string, 0)
+	grouped := map[string]*versionTargetHost{}
+	for _, row := range rows {
+		if row.IP == "" || row.Port <= 0 {
+			continue
+		}
+		host, ok := grouped[row.IP]
+		if !ok {
+			host = &versionTargetHost{
+				IP:       row.IP,
+				Hostname: row.Hostname,
+				Project:  row.Project,
+			}
+			grouped[row.IP] = host
+			order = append(order, row.IP)
+		}
+		if strings.ToLower(row.Protocol) == "tcp" || row.Protocol == "" {
+			host.TCPPorts = append(host.TCPPorts, row.Port)
+		}
+	}
+
+	hosts := make([]versionTargetHost, 0, len(order))
+	for _, ip := range order {
+		host := grouped[ip]
+		host.TCPPorts = uniqueSortedInts(host.TCPPorts)
+		if len(host.TCPPorts) > 0 {
+			hosts = append(hosts, *host)
+		}
+	}
+	return hosts
+}
+
+func (h versionTargetHost) portSet() map[string]struct{} {
+	set := make(map[string]struct{}, len(h.TCPPorts))
+	for _, port := range h.TCPPorts {
+		set[portKey(h.IP, "tcp", port)] = struct{}{}
+	}
+	return set
+}
+
+func uniqueSortedInts(values []int) []int {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[int]struct{}{}
+	out := make([]int, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func intSliceToStrings(values []int) []string {
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = fmt.Sprintf("%d", value)
+	}
+	return out
 }
