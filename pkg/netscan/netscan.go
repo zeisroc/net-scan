@@ -77,6 +77,24 @@ type ListOptions struct {
 	OutputWriter io.Writer
 }
 
+// Host is a public read model for hosts stored in net-scan.
+type Host struct {
+	IP       string `json:"ip"`
+	Hostname string `json:"hostname,omitempty"`
+	Domain   string `json:"domain,omitempty"`
+	Project  string `json:"project,omitempty"`
+	Tag      string `json:"tag,omitempty"`
+	Ports    []Port `json:"ports,omitempty"`
+}
+
+// Port is a public read model for an open port.
+type Port struct {
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+	Service  string `json:"service,omitempty"`
+	Version  string `json:"version,omitempty"`
+}
+
 // Ingest imports SharpScan or nmap XML output into a net-scan database.
 func Ingest(opts IngestOptions) error {
 	if opts.Input == nil {
@@ -302,6 +320,7 @@ func List(opts ListOptions) error {
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
+
 	defer db.Close()
 
 	if opts.Source == "LIST" {
@@ -313,6 +332,7 @@ func List(opts ListOptions) error {
 			out(opts.OutputWriter, "[i] No sources found.\n")
 			return nil
 		}
+
 		out(opts.OutputWriter, "[i] Available sources:\n")
 		for _, source := range sources {
 			out(opts.OutputWriter, "  - %s\n", source)
@@ -352,6 +372,48 @@ func List(opts ListOptions) error {
 		printHostsTable(opts.OutputWriter, hosts, cfg.InterestingPorts)
 	}
 	return nil
+}
+
+// ListHostRows returns project scan hosts for library consumers.
+func ListHostRows(opts ListOptions) ([]Host, error) {
+	db, err := dbpkg.Open(opts.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	defer db.Close()
+
+	rows, err := dbpkg.ListHosts(db, dbpkg.PortFilter{
+		IP:      opts.Host,
+		Port:    opts.Port,
+		Service: opts.Service,
+		Project: opts.Project,
+		Domain:  opts.Domain,
+		Source:  opts.Source,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	hosts := make([]Host, 0, len(rows))
+	for _, row := range rows {
+		host := Host{
+			IP:       row.IP,
+			Hostname: row.Hostname,
+			Domain:   row.Domain,
+			Project:  row.Project,
+			Tag:      row.Tag,
+		}
+		for _, port := range row.Ports {
+			host.Ports = append(host.Ports, Port{
+				Port:     port.Port,
+				Protocol: port.Protocol,
+				Service:  port.Service,
+				Version:  port.Version,
+			})
+		}
+		hosts = append(hosts, host)
+	}
+	return hosts, nil
 }
 
 func detectFormat(path string) string {
