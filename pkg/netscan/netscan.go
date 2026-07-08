@@ -2,11 +2,13 @@
 package netscan
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pwnbox/net_scan/internal/config"
 	dbpkg "github.com/pwnbox/net_scan/internal/db"
@@ -57,6 +59,21 @@ type EnrichOptions struct {
 	Proxychains  string
 	Debug        bool
 	Verbose      bool
+	OutputWriter io.Writer
+}
+
+// ListOptions configures scan-result listing.
+type ListOptions struct {
+	DBPath       string
+	ConfigPath   string
+	Project      string
+	Host         string
+	Port         int
+	Service      string
+	Domain       string
+	Source       string
+	JSON         bool
+	Markdown     bool
 	OutputWriter io.Writer
 }
 
@@ -279,6 +296,64 @@ func Enrich(opts EnrichOptions) error {
 	return nil
 }
 
+// List renders scan results using net-scan's grouped host view.
+func List(opts ListOptions) error {
+	db, err := dbpkg.Open(opts.DBPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer db.Close()
+
+	if opts.Source == "LIST" {
+		sources, err := dbpkg.ListSources(db)
+		if err != nil {
+			return err
+		}
+		if len(sources) == 0 {
+			out(opts.OutputWriter, "[i] No sources found.\n")
+			return nil
+		}
+		out(opts.OutputWriter, "[i] Available sources:\n")
+		for _, source := range sources {
+			out(opts.OutputWriter, "  - %s\n", source)
+		}
+		out(opts.OutputWriter, "\n")
+		return nil
+	}
+
+	hosts, err := dbpkg.ListHosts(db, dbpkg.PortFilter{
+		IP:      opts.Host,
+		Port:    opts.Port,
+		Service: opts.Service,
+		Project: opts.Project,
+		Domain:  opts.Domain,
+		Source:  opts.Source,
+	})
+	if err != nil {
+		return err
+	}
+	if len(hosts) == 0 {
+		out(opts.OutputWriter, "[i] No results.\n")
+		return nil
+	}
+
+	switch {
+	case opts.JSON:
+		enc := json.NewEncoder(opts.OutputWriter)
+		enc.SetIndent("", "  ")
+		return enc.Encode(hosts)
+	case opts.Markdown:
+		printHostsMarkdown(opts.OutputWriter, hosts)
+	default:
+		cfg, err := config.Load(opts.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		printHostsTable(opts.OutputWriter, hosts, cfg.InterestingPorts)
+	}
+	return nil
+}
+
 func detectFormat(path string) string {
 	if strings.ToLower(filepath.Ext(path)) == ".xml" {
 		return "nmap-xml"
@@ -428,4 +503,201 @@ func intSliceToStrings(values []int) []string {
 		out[i] = fmt.Sprintf("%d", value)
 	}
 	return out
+}
+
+const (
+	ansiReset  = "\033[0m"
+	ansiBold   = "\033[1m"
+	ansiDim    = "\033[2m"
+	ansiRed    = "\033[31m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiCyan   = "\033[36m"
+)
+
+type listRow struct {
+	ip      string
+	host    string
+	domain  string
+	pwnd    string
+	tag     string
+	ports   string
+	isPwned bool
+}
+
+func buildListRows(hosts []dbpkg.HostRow) []listRow {
+	rows := make([]listRow, len(hosts))
+	for i, h := range hosts {
+		rows[i] = listRow{
+			ip:      h.IP,
+			host:    defaultString(h.Hostname, "—"),
+			domain:  defaultString(h.Domain, "—"),
+			pwnd:    pwnedLabel(h.Pwned),
+			tag:     defaultString(h.Tag, "UNKNOWN"),
+			ports:   formatPortsCompact(h.Ports),
+			isPwned: h.Pwned,
+		}
+	}
+	return rows
+}
+
+func printHostsTable(w io.Writer, hosts []dbpkg.HostRow, interestingPorts []int) {
+	totalPorts := 0
+	for _, h := range hosts {
+		totalPorts += len(h.Ports)
+	}
+
+	interesting := make(map[int]bool)
+	for _, p := range interestingPorts {
+		interesting[p] = true
+	}
+
+	rows := buildListRows(hosts)
+	wIP, wHost, wDomain, wPwnd, wTag, wPorts :=
+		runeLen("IP"), runeLen("HOSTNAME"), runeLen("DOMAIN"), runeLen("PWND"), runeLen("TAGS"), runeLen("PORTS")
+	for _, r := range rows {
+		wIP = max(wIP, runeLen(r.ip))
+		wHost = max(wHost, runeLen(r.host))
+		wDomain = max(wDomain, runeLen(r.domain))
+		wTag = max(wTag, runeLen(r.tag))
+		wPorts = max(wPorts, runeLen(r.ports))
+	}
+
+	out(w, "\n  %s%d host(s)  ·  %d open port(s)%s\n\n", ansiDim, len(hosts), totalPorts, ansiReset)
+	out(w, "  %s  %s  %s  %s  %s  %s\n",
+		ansiBold+padRight("IP", wIP)+ansiReset,
+		ansiBold+padRight("HOSTNAME", wHost)+ansiReset,
+		ansiBold+padRight("DOMAIN", wDomain)+ansiReset,
+		ansiBold+padRight("PWND", wPwnd)+ansiReset,
+		ansiBold+padRight("TAGS", wTag)+ansiReset,
+		ansiBold+"PORTS"+ansiReset,
+	)
+	out(w, "  %s%s  %s  %s  %s  %s  %s%s\n",
+		ansiDim,
+		strings.Repeat("─", wIP),
+		strings.Repeat("─", wHost),
+		strings.Repeat("─", wDomain),
+		strings.Repeat("─", wPwnd),
+		strings.Repeat("─", wTag),
+		strings.Repeat("─", wPorts),
+		ansiReset,
+	)
+
+	for i, r := range rows {
+		hostStr := padRight(r.host, wHost)
+		if r.isPwned {
+			hostStr = ansiBold + ansiRed + hostStr + ansiReset
+		}
+
+		domainStr := padRight(r.domain, wDomain)
+		if r.domain == "—" {
+			domainStr = ansiDim + domainStr + ansiReset
+		}
+
+		pwndStr := padRight(r.pwnd, wPwnd)
+		if r.isPwned {
+			pwndStr = ansiBold + ansiRed + pwndStr + ansiReset
+		} else {
+			pwndStr = ansiDim + pwndStr + ansiReset
+		}
+
+		tagStr := padRight(r.tag, wTag)
+		if r.tag == "UNKNOWN" {
+			tagStr = ansiDim + tagStr + ansiReset
+		} else {
+			tagStr = ansiYellow + tagStr + ansiReset
+		}
+
+		out(w, "  %s  %s  %s  %s  %s  %s\n",
+			ansiBold+ansiCyan+padRight(r.ip, wIP)+ansiReset,
+			hostStr,
+			domainStr,
+			pwndStr,
+			tagStr,
+			formatPortsHighlighted(hosts[i].Ports, interesting),
+		)
+	}
+	out(w, "\n")
+}
+
+func printHostsMarkdown(w io.Writer, hosts []dbpkg.HostRow) {
+	out(w, "| IP | HOSTNAME | DOMAIN | PWND | TAGS | PORTS |\n")
+	out(w, "|---|---|---|---|---|---|\n")
+	for _, h := range hosts {
+		out(w, "| %s | %s | %s | %s | %s | %s |\n",
+			h.IP,
+			defaultString(h.Hostname, "—"),
+			defaultString(h.Domain, "—"),
+			pwnedMarkdownLabel(h.Pwned),
+			defaultString(h.Tag, "UNKNOWN"),
+			formatPortsCompact(h.Ports),
+		)
+	}
+}
+
+func formatPortsCompact(ports []dbpkg.PortInfo) string {
+	if len(ports) == 0 {
+		return "not scanned"
+	}
+	parts := make([]string, 0, len(ports))
+	for _, p := range ports {
+		entry := fmt.Sprintf("%d", p.Port)
+		if p.Service != "" {
+			entry += "(" + p.Service + ")"
+		}
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, "  ")
+}
+
+func formatPortsHighlighted(ports []dbpkg.PortInfo, interesting map[int]bool) string {
+	if len(ports) == 0 {
+		return ansiDim + "not scanned" + ansiReset
+	}
+	parts := make([]string, 0, len(ports))
+	for _, p := range ports {
+		entry := fmt.Sprintf("%d", p.Port)
+		if p.Service != "" {
+			entry += "(" + p.Service + ")"
+		}
+		if interesting[p.Port] {
+			parts = append(parts, ansiBold+ansiRed+entry+ansiReset)
+		} else {
+			parts = append(parts, ansiGreen+entry+ansiReset)
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
+func padRight(s string, width int) string {
+	n := runeLen(s)
+	if n >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-n)
+}
+
+func runeLen(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+func defaultString(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func pwnedLabel(pwned bool) string {
+	if pwned {
+		return "✓"
+	}
+	return "-"
+}
+
+func pwnedMarkdownLabel(pwned bool) string {
+	if pwned {
+		return "✓"
+	}
+	return "✗"
 }
